@@ -38,16 +38,10 @@ EntroPE consists of three main components:
 ## Installation
 
 ```bash
-# Clone the repository (link will be provided upon acceptance)
-git clone https://anonymous.repository/entrope
-cd entrope
-
 # Install dependencies
-pip install -r requirements.txt
-
-# Or using conda
-conda env create -f environment.yml
+conda create --name entrope python=3.10
 conda activate entrope
+pip install -r requirements.txt
 ```
 
 ---
@@ -103,25 +97,24 @@ EntroPE achieves significant improvements over existing methods:
 ### Model Parameters
 
 ```yaml
-# Core architecture
-seq_len: 96              # Input sequence length
-pred_len: 96             # Prediction horizon
-d_model: 512             # Model dimension
-n_heads: 8               # Number of attention heads
-e_layers: 2              # Number of encoder layers
-
-# Dynamic patching
-threshold_global: 3.0    # Global entropy threshold (θ)
-threshold_relative: 0.25 # Relative entropy threshold (γ)
-max_patch_len: 24        # Maximum patch length
-vocab_size: 256          # Tokenization vocabulary size
-
-# Training
 learning_rate: 0.001
 batch_size: 64
 train_epochs: 20
 patience: 7
 dropout: 0.1
+dim: 8
+multiple_of: 64   # ff-dim 
+heads: 2
+layers: 1
+batch_size: 32
+learning_rate: 0.01
+dropout: 0.01
+monotonicity: 1
+patching_threshold: 0.2
+patching_threshold_add: 0.01
+max_patch_length: 24
+train_epochs: 10
+patience: 10
 ```
 
 ### Threshold Selection
@@ -169,8 +162,6 @@ This project is licensed under the Apache License - see the LICENSE file for det
 
 ---
 
-## Contact
-
-For questions about this work, please contact: [contact information will be provided upon acceptance]
+## Availability
 
 Repository will be made public upon paper acceptance.
