@@ -49,12 +49,11 @@ pip install -r requirements.txt
 
 ### Datasets
 
-We evaluate on 8 benchmark datasets:
+We evaluate on 7 benchmark datasets:
 - **ETT family**: ETTh1, ETTh2, ETTm1, ETTm2 (Energy)
 - **Weather**: Meteorological data 
 - **Electricity**: Power consumption
 - **Exchange Rate**: Currency exchange rates
-- **Traffic**: Road occupancy rates
 
 ### Reproduction
 
