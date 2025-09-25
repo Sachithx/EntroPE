@@ -1,0 +1,32 @@
+[
+  {
+    "hyperparams": {
+      "n_layer": 2,
+      "n_head": 2,
+      "n_embd": 32,
+      "quant_range": 8,
+      "vocab_size": 256
+    },
+    "best_val_loss": 2.6020445645801606,
+    "best_epoch": 41,
+    "total_epochs": 50,
+    "total_params": 36000,
+    "training_time": 1709.6530358791351,
+    "early_stopped": false
+  },
+  {
+    "hyperparams": {
+      "n_layer": 2,
+      "n_head": 4,
+      "n_embd": 64,
+      "quant_range": 8,
+      "vocab_size": 512
+    },
+    "best_val_loss": 3.1774370378918118,
+    "best_epoch": 42,
+    "total_epochs": 50,
+    "total_params": 137536,
+    "training_time": 1823.3038160800934,
+    "early_stopped": false
+  }
+]

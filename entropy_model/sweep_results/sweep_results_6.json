@@ -1,0 +1,92 @@
+[
+  {
+    "hyperparams": {
+      "n_layer": 2,
+      "n_head": 2,
+      "n_embd": 32,
+      "quant_range": 8,
+      "vocab_size": 256
+    },
+    "best_val_loss": 2.6020445645801606,
+    "best_epoch": 41,
+    "total_epochs": 50,
+    "total_params": 36000,
+    "training_time": 1709.6530358791351,
+    "early_stopped": false
+  },
+  {
+    "hyperparams": {
+      "n_layer": 2,
+      "n_head": 4,
+      "n_embd": 64,
+      "quant_range": 8,
+      "vocab_size": 512
+    },
+    "best_val_loss": 3.1774370378918118,
+    "best_epoch": 42,
+    "total_epochs": 50,
+    "total_params": 137536,
+    "training_time": 1823.3038160800934,
+    "early_stopped": false
+  },
+  {
+    "hyperparams": {
+      "n_layer": 3,
+      "n_head": 4,
+      "n_embd": 64,
+      "quant_range": 12,
+      "vocab_size": 512
+    },
+    "best_val_loss": 2.837437483999464,
+    "best_epoch": 20,
+    "total_epochs": 35,
+    "total_params": 186816,
+    "training_time": 1423.2851750850677,
+    "early_stopped": true
+  },
+  {
+    "hyperparams": {
+      "n_layer": 3,
+      "n_head": 6,
+      "n_embd": 96,
+      "quant_range": 12,
+      "vocab_size": 1024
+    },
+    "best_val_loss": 3.4076455823958867,
+    "best_epoch": 19,
+    "total_epochs": 34,
+    "total_params": 439968,
+    "training_time": 1463.5375502109528,
+    "early_stopped": true
+  },
+  {
+    "hyperparams": {
+      "n_layer": 4,
+      "n_head": 8,
+      "n_embd": 128,
+      "quant_range": 12,
+      "vocab_size": 1024
+    },
+    "best_val_loss": 3.4211082995884,
+    "best_epoch": 4,
+    "total_epochs": 19,
+    "total_params": 930944,
+    "training_time": 748.9827530384064,
+    "early_stopped": true
+  },
+  {
+    "hyperparams": {
+      "n_layer": 4,
+      "n_head": 4,
+      "n_embd": 64,
+      "quant_range": 16,
+      "vocab_size": 1024
+    },
+    "best_val_loss": 3.177385776005094,
+    "best_epoch": 33,
+    "total_epochs": 48,
+    "total_params": 268864,
+    "training_time": 2134.5338835716248,
+    "early_stopped": true
+  }
+]

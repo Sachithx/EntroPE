@@ -1,0 +1,4 @@
+df_dir: /home/par/blt_df
+output_chart_dir: figures/
+frame_files:
+  ["4b_df.json", "500m_df.json", "scaling_arch_df.json", "scaling_df.json"]

@@ -1,0 +1,4 @@
+data_path: plot_data/entropy_figure.json
+chart_path: figures/entropy_figure.pdf
+threshold_override: 1.7171002626419067
+score_override_path: plot_data/scores.json

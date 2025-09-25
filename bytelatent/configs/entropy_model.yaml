@@ -1,0 +1,75 @@
+# Template config, need to change dump_dir, data.root_dir and tokenizer.path
+# Evals can be activated by uncommenting its config
+# python -m launchers.stool config=apps/main/configs/debug.yaml nodes=8 account=fair_amaia_cw_codegen qos=lowest
+
+dump_dir: /tmp/blt-entropy
+name: "debug"
+steps: 100_000
+max_steps: null
+probe_freq: null
+seed: 777
+optim:
+  lr: 4e-04
+  warmup: 500
+  lr_min_ratio: 0.1
+  clip: 10.0
+
+distributed:
+  fsdp_type: full_shard
+  model_dtype: bf16
+  matmul_allow_tf32: false
+  selective_activation_checkpointing: false
+  tp_size: 1
+
+train_entropy_model: true
+model: null
+entropy_model:
+  dim: 768
+  n_layers: 14
+  n_heads: 12
+  max_seqlen: 8192
+  # vocab_size: -1
+  vocab_size: 260
+  ffn_dim_multiplier: 1.0
+  sliding_window: 512
+  attn_bias_type: "local_block_causal"
+  attn_impl: "xformers"
+
+data:
+  root_dir: ???
+  sources:
+    dclm_baseline_1.0: 1.0
+  batch_size: 2
+  prefetch_size: 64
+  # seqlen is in terms of patches and
+  # max_encoder_seq_length is in terms of bytes.
+  # For entropy model, these are the same since 1 patch=1 byte
+  seq_len: 8192
+  max_encoder_seq_length: 8192
+  load_async: true
+  preprocess_dir: ???
+  # We don't need patches for this model
+  add_patches: false
+  patcher_args:
+    # This doesn't matter since byte entropy model doesn't use patching,
+    # so pick the most efficient, so static
+    patching_mode: byte
+  tokenizer_args:
+    name: blt
+
+profiling:
+  run: false
+
+checkpoint:
+  dump:
+    every: 500
+    keep: 3
+  eval:
+    every: 1000
+    keep: -1
+
+logging:
+  freq: 10
+
+eval_on_gpus: 8
+eval: null
