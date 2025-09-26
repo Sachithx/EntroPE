@@ -2,7 +2,7 @@
 
 This repository contains the official implementation of the paper:
 > **EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting**  
-> *Under review at ICLR 2026*
+> *Under review.*
 
 ---
 
