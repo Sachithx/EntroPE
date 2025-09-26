@@ -24,7 +24,7 @@ import argparse  # Make sure this is imported
 def build_dataloader(dataset_name, features, seq_len, label_len, pred_len, flag, batch_size, embed='timeF'):
     args = argparse.Namespace(
         data=dataset_name if 'ETT' in dataset_name else 'custom',
-        root_path='dataset/',
+        root_path='../dataset/',
         data_path=f'{dataset_name}.csv',
         features=features,
         target='OT',  # target column, typically "OT" in ETT datasets
