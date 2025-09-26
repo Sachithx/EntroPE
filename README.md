@@ -152,15 +152,48 @@ Tested on (Only single-GPU settings):
 This project is licensed under the Apache License - see the LICENSE file for details.
 
 ---
-
 ## Acknowledgments
 
-- Built on the foundation of PatchTST and other patch-based time series transformers
-- Inspired by dynamic patching approaches in NLP (Byte Latent Transformer)
-- Evaluation framework adapted from TimeKAN benchmarking suite
+This work builds upon and is inspired by several key contributions in the field:
+
+### Foundational Work
+- **PatchTST**: Our approach is built on the foundation of PatchTST and other patch-based time series transformers, which demonstrated the effectiveness of patch-based architectures for time series forecasting.
+
+```bibtex
+@inproceedings{Yuqietal-2023-PatchTST,
+  title     = {A Time Series is Worth 64 Words: Long-term Forecasting with Transformers},
+  author    = {Nie, Yuqi and
+               H. Nguyen, Nam and
+               Sinthong, Phanwadee and 
+               Kalagnanam, Jayant},
+  booktitle = {International Conference on Learning Representations},
+  year      = {2023}
+}
+```
+
+### Dynamic Patching Inspiration
+- **Byte Latent Transformer**: Our dynamic patching approach draws inspiration from advances in NLP, particularly the Byte Latent Transformer's innovative approach to variable-length tokenization.
+
+```bibtex
+@article{meta_blt,
+  author    = {Artidoro Pagnoni and Ram Pasunuru and Pedro Rodriguez and 
+               John Nguyen and Benjamin Muller and Margaret Li and 
+               Chunting Zhou and Lili Yu and Jason Weston and 
+               Luke Zettlemoyer and Gargi Ghosh and Mike Lewis and 
+               Ari Holtzman and Srinivasan Iyer},
+  title     = {Byte Latent Transformer: Patches Scale Better Than Tokens},
+  url       = {https://github.com/facebookresearch/blt},
+  year      = {2024}
+}
+```
+
+### Evaluation and Implementation
+- **TimeKAN Benchmarking Suite**: Our evaluation framework is adapted from the TimeKAN benchmarking suite, providing robust and standardized performance metrics.
+
+- **nanoGPT**: The Entropy Model GPT-2 architecture implementation partially incorporates code from Andrej Karpathy's nanoGPT implementation. We gratefully acknowledge this clean and educational codebase.
+  - Repository: https://github.com/karpathy/nanoGPT
 
 ---
 
-## Availability
-
-Repository will be made public upon paper acceptance.
+We thank the authors of these works for their contributions to the open-source community and for advancing the state of the art in time series forecasting and transformer architectures.
+---
