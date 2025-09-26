@@ -6,9 +6,25 @@ This repository contains the official implementation of the paper:
 
 ---
 
-## Overview
+# Overview
 
 **EntroPE** introduces a novel framework for temporally-informed dynamic patching in time series forecasting using Transformer models. Unlike conventional fixed-length patching schemes that arbitrarily segment temporal sequences, our method uses information-theoretic principles to identify natural transition points and dynamically place patch boundaries where predictive uncertainty is highest.
+
+## Architecture
+
+![Main Architecture](assets/main_architecture.png)
+
+*Comprehensive architecture of EntroPE. The model processes input through: (A) Entropy-Based Dynamic Patcher - A small causal transformer calculates entropy at each time point to identify boundaries where predictive uncertainty is high; (B) Adaptive Patch Encoder - Cross-attention layers aggregate intra-patch dependencies into fixed-size global embeddings; (C) Fusion Decoder - Cross-attention combines global patch context with local encoder hidden states for accurate forecasting.*
+
+## Dynamic vs. Static Patching
+
+![Static vs Dynamic Patching](assets/static_vs_dynamic_patch.png)
+
+*Comparison between traditional static patching (top) and our entropy-driven dynamic patching approach (bottom). Dynamic patches adapt to the inherent temporal structure and complexity of the time series data.*
+
+## Key Innovation
+
+By leveraging entropy measurements to guide patch boundary placement, EntroPE creates semantically meaningful segments that respect the natural temporal structure of time series data. This approach leads to more effective representation learning and improved forecasting performance compared to traditional fixed-size patching methods.
 
 ---
 
