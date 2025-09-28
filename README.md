@@ -148,10 +148,7 @@ This work builds upon and is inspired by several key contributions in the field:
 ```bibtex
 @inproceedings{Yuqietal-2023-PatchTST,
   title     = {A Time Series is Worth 64 Words: Long-term Forecasting with Transformers},
-  author    = {Nie, Yuqi and
-               H. Nguyen, Nam and
-               Sinthong, Phanwadee and 
-               Kalagnanam, Jayant},
+  author    = {Nie, Yuqi and H. Nguyen, Nam and Sinthong, Phanwadee and Kalagnanam, Jayant},
   booktitle = {International Conference on Learning Representations},
   year      = {2023}
 }
@@ -167,7 +164,7 @@ This work builds upon and is inspired by several key contributions in the field:
   booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
   year      = {2025},
   address   = {Vienna, Austria},
-  publisher = {Association for Computational Linguistics
+  publisher = {Association for Computational Linguistics}
 }
 ```
 
