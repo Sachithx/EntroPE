@@ -167,7 +167,8 @@ This work builds upon and is inspired by several key contributions in the field:
   booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
   year      = {2025},
   address   = {Vienna, Austria},
-  publisher = {Association for Computational Linguistics}
+  publisher = {Association for Computational Linguistics
+}
 ```
 
 ### Evaluation and Implementation
