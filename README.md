@@ -162,15 +162,12 @@ This work builds upon and is inspired by several key contributions in the field:
 
 ```bibtex
 @article{meta_blt,
-  author    = {Artidoro Pagnoni and Ram Pasunuru and Pedro Rodriguez and 
-               John Nguyen and Benjamin Muller and Margaret Li and 
-               Chunting Zhou and Lili Yu and Jason Weston and 
-               Luke Zettlemoyer and Gargi Ghosh and Mike Lewis and 
-               Ari Holtzman and Srinivasan Iyer},
   title     = {Byte Latent Transformer: Patches Scale Better Than Tokens},
-  url       = {https://github.com/facebookresearch/blt},
-  year      = {2024}
-}
+  author    = {Pagnoni, Artidoro and Pasunuru, Ramakanth and Rodriguez, Pedro and Nguyen, John and Muller, Benjamin and Li, Margaret and Zhou, Chunting and Yu, Lili and Weston, Jason E and Zettlemoyer, Luke and Ghosh, Gargi and Lewis, Mike and Holtzman, Ari and Iyer, Srini},
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
+  year      = {2025},
+  address   = {Vienna, Austria},
+  publisher = {Association for Computational Linguistics}
 ```
 
 ### Evaluation and Implementation
