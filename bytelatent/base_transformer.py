@@ -14,19 +14,20 @@ from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     flex_attention,
 )
-from xformers.ops import AttentionBias, fmha
+# from xformers.ops import AttentionBias, fmha
 
 from bytelatent.tokenizers.constants import EOS_ID
 
 logger = logging.getLogger()
 
-try:
-    from apex.normalization.fused_layer_norm import FusedRMSNorm
+# try:
+#     from apex.normalization.fused_layer_norm import FusedRMSNorm
 
-    RMSNorm = FusedRMSNorm
-except (ImportError, ModuleNotFoundError):
-    logging.debug("Apex not found. Using nn.RMSNorm")
-    RMSNorm = nn.RMSNorm
+#     RMSNorm = FusedRMSNorm
+# except (ImportError, ModuleNotFoundError):
+#     logging.debug("Apex not found. Using nn.RMSNorm")
+
+RMSNorm = nn.RMSNorm
 
 if int(os.environ.get("BLT_ALLOW_MISSING_FLEX_ATTENTION", False)) == 0:
     flex_attention_comp = torch.compile(flex_attention)
@@ -306,11 +307,11 @@ class RotaryEmbedding(torch.nn.Module):
 
 
 def _reshape_for_attn_bias(
-    attn_bias: AttentionBias | None,
+    attn_bias: None,
     *tensors: torch.Tensor,
 ) -> list[torch.Tensor]:
     to_transform = list(tensors)
-    if isinstance(attn_bias, fmha.attn_bias.BlockDiagonalCausalMask):
+    if isinstance(attn_bias):
         # could be `view` instead of reshape during training, but for inference
         # have to reshape due to strides mismatch
         to_transform = [t.reshape(1, -1, *t.shape[2:]) for t in to_transform]
@@ -363,7 +364,7 @@ class Attention(nn.Module):
         x: torch.Tensor,
         freq_cis: torch.Tensor,
         tok_idx: Optional[torch.Tensor] = None,
-        mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
+        mask: Optional[Union[BlockMask, str]] = None,
         attn_impl: str = "sdpa",
     ) -> torch.Tensor:
         # B S D
@@ -394,13 +395,13 @@ class Attention(nn.Module):
             output = flex_attention_comp(xq, xk, xv, block_mask=mask)
             output = output.transpose(1, 2).contiguous()  # B H S D -> B S H D
 
-        elif attn_impl == "xformers":
-            assert mask is None or isinstance(mask, AttentionBias)
-            query_shape = xq.shape
-            xq, xk, xv = _reshape_for_attn_bias(mask, xq, xk, xv)
-            output = fmha.memory_efficient_attention(xq, xk, xv, attn_bias=mask)
-            output = output.view(query_shape)
-            # This uses B S H D instead of B H S D of pytorch
+        # elif attn_impl == "xformers":
+        #     assert mask is None or isinstance(mask)
+        #     query_shape = xq.shape
+        #     xq, xk, xv = _reshape_for_attn_bias(mask, xq, xk, xv)
+        #     output = fmha.memory_efficient_attention(xq, xk, xv, attn_bias=mask)
+        #     output = output.view(query_shape)
+        #     # This uses B S H D instead of B H S D of pytorch
 
         elif attn_impl == "sdpa":
             xq, xk, xv = map(lambda e: e.transpose(1, 2), (xq, xk, xv))
@@ -550,7 +551,7 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         freq_cis: torch.Tensor,
         tok_idx: Optional[torch.Tensor] = None,
-        mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
+        mask: Optional[Union[BlockMask, str]] = None,
         attn_impl: str = "sdpa",
     ) -> torch.Tensor:
         attn_out = self.attention(
@@ -607,7 +608,7 @@ class BaseTransformer(nn.Module, SequenceModelWithOutput):
         self,
         h,
         tok_idx: Optional[torch.Tensor] = None,
-        mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
+        mask: Optional[Union[BlockMask, str]] = None,
         attn_impl: str = "sdpa",
     ):
 

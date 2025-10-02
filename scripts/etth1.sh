@@ -1,3 +1,4 @@
+CUDA_VISIBLE_DEVICES=1
 if [ ! -d "./logs" ]; then
     mkdir ./logs
 fi
@@ -20,20 +21,20 @@ dim=8
 multiple_of=64
 heads=2
 layers=1
-batch_size=32
-learning_rate=0.01
+batch_size=256
+learning_rate=0.0001
 dropout=0.01
 monotonicity=1
 patching_threshold=0.2
 patching_threshold_add=0.01
 max_patch_length=24
-train_epochs=10
-patience=10
+train_epochs=100
+patience=20
 
 
-for random_seed in 2025 2024 2023 2022 2021
+for random_seed in 2025 
 do
-    for pred_len in 96 192 336 720
+    for pred_len in 96 
     do
         python -u run_longExp.py \
         --random_seed $random_seed \

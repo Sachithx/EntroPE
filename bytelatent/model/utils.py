@@ -4,7 +4,7 @@ import os
 
 import torch
 from torch.nn.attention.flex_attention import create_block_mask
-from xformers.ops import fmha
+# from xformers.ops import fmha
 
 logger = logging.getLogger()
 
@@ -133,39 +133,39 @@ def create_causal_mask(
     tokens: torch.Tensor | None = None,
     sliding_window: int | None = None,
 ):
-    if attn_impl == "xformers":
-        if attn_bias_type is None:
-            return fmha.attn_bias.LowerTriangularMask()
-        elif attn_bias_type == "causal":
-            assert sliding_window is None
-            return fmha.attn_bias.LowerTriangularMask()
-        elif attn_bias_type == "block_causal":
-            print(
-                "Block causal attention is not implemented for xformers, using causal instead"
-            )
+    # if attn_impl == "xformers":
+    #     if attn_bias_type is None:
+    #         return fmha.attn_bias.LowerTriangularMask()
+    #     elif attn_bias_type == "causal":
+    #         assert sliding_window is None
+    #         return fmha.attn_bias.LowerTriangularMask()
+    #     elif attn_bias_type == "block_causal":
+    #         print(
+    #             "Block causal attention is not implemented for xformers, using causal instead"
+    #         )
 
-            assert sliding_window is None
-            assert eos_id is not None
-            assert tokens is not None
-            return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-                q_seqlen=tokens_to_seqlen(tokens, eos_id)
-            )
-        elif attn_bias_type == "local_block_causal":
-            assert sliding_window is not None
-            assert eos_id is not None
-            assert tokens is not None
-            # print(fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-            #     q_seqlen=tokens_to_seqlen(tokens, eos_id)
-            # ).make_local_attention(sliding_window)
+    #         assert sliding_window is None
+    #         assert eos_id is not None
+    #         assert tokens is not None
+    #         return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
+    #             q_seqlen=tokens_to_seqlen(tokens, eos_id)
+    #         )
+    #     elif attn_bias_type == "local_block_causal":
+    #         assert sliding_window is not None
+    #         assert eos_id is not None
+    #         assert tokens is not None
+    #         # print(fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
+    #         #     q_seqlen=tokens_to_seqlen(tokens, eos_id)
+    #         # ).make_local_attention(sliding_window)
+    #         # )
+    #         return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
+    #             q_seqlen=tokens_to_seqlen(tokens, eos_id)
+    #         ).make_local_attention(sliding_window)
+    #     else:
+    #         return fmha.attn_bias.LocalAttentionFromBottomRightMask(
+    #             window_left=sliding_window - 1, window_right=0
             # )
-            return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-                q_seqlen=tokens_to_seqlen(tokens, eos_id)
-            ).make_local_attention(sliding_window)
-        else:
-            return fmha.attn_bias.LocalAttentionFromBottomRightMask(
-                window_left=sliding_window - 1, window_right=0
-            )
-    elif attn_impl == "sdpa":
+    if attn_impl == "sdpa":
         BLT_SUPPRESS_ATTN_ERROR = int(os.environ.get("BLT_SUPPRESS_ATTN_ERROR", 0))
 
         if attn_bias_type == "causal":

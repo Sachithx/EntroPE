@@ -9,7 +9,7 @@ import torch.nn as nn
 from pydantic import ConfigDict
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import BlockMask
-from xformers.ops import AttentionBias
+# from xformers.ops import AttentionBias
 
 from bytelatent.base_transformer import (
     BaseTransformerArgs,
@@ -22,13 +22,13 @@ from bytelatent.model.utils import create_causal_mask, downsample
 from bytelatent.tokenizers.blt_tokenizer import BOE_ID
 
 logger = logging.getLogger()
-try:
-    from apex.normalization.fused_layer_norm import FusedRMSNorm
+# try:
+#     from apex.normalization.fused_layer_norm import FusedRMSNorm
 
-    RMSNorm = FusedRMSNorm
-except (ImportError, ModuleNotFoundError):
-    logging.debug("Apex not found. Using nn.RMSNorm")
-    RMSNorm = nn.RMSNorm
+#     RMSNorm = FusedRMSNorm
+# except (ImportError, ModuleNotFoundError):
+#     logging.debug("Apex not found. Using nn.RMSNorm")
+RMSNorm = nn.RMSNorm
 
 
 class LocalModelArgs(BaseTransformerArgs):
@@ -253,7 +253,7 @@ class LocalEncoder(LocalModelBase):
         tokens: torch.Tensor,
         embeds: Optional[torch.Tensor] = None,
         patch_embeds: Optional[torch.Tensor] = None,
-        mask: Optional[Union["BlockMask", "AttentionBias", torch.Tensor, str]] = None,
+        mask: Optional[Union["BlockMask", torch.Tensor, str]] = None,
         cross_mask: Optional[torch.Tensor] = None,
         num_patches: Optional[int] = None,
         patch_ids: Optional[torch.Tensor] = None,
@@ -366,7 +366,7 @@ class LocalDecoder(LocalModelBase):
         tokens: torch.Tensor,
         embeds: Optional[torch.Tensor],
         patch_embeds: Optional[torch.Tensor] = None,
-        mask: Optional[Union["BlockMask", "AttentionBias", torch.Tensor, str]] = None,
+        mask: Optional[Union["BlockMask", torch.Tensor, str]] = None,
         cross_mask: Optional[torch.Tensor] = None,
         cache: Optional[List[Tuple[torch.Tensor, torch.Tensor, int]]] = None,
     ):

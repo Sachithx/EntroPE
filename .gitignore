@@ -217,3 +217,4 @@ test_results/
 result.txt
 entropy_model/test.ipynb
 wandb
+results/

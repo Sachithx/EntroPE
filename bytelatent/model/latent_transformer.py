@@ -7,7 +7,7 @@ import torch.nn
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import BlockMask
-from xformers.ops import AttentionBias
+# from xformers.ops import AttentionBias
 
 from bytelatent.base_transformer import (
     BaseTransformer,
@@ -18,13 +18,13 @@ from bytelatent.base_transformer import (
 from bytelatent.model.utils import create_causal_mask
 
 logger = logging.getLogger()
-try:
-    from apex.normalization.fused_layer_norm import FusedRMSNorm
+# try:
+#     from apex.normalization.fused_layer_norm import FusedRMSNorm
 
-    RMSNorm = FusedRMSNorm
-except (ImportError, ModuleNotFoundError):
-    logging.debug("Apex not found. Using nn.RMSNorm")
-    RMSNorm = nn.RMSNorm
+#     RMSNorm = FusedRMSNorm
+# except (ImportError, ModuleNotFoundError):
+#     logging.debug("Apex not found. Using nn.RMSNorm")
+RMSNorm = nn.RMSNorm
 
 
 class CrossAttention(nn.Module):
@@ -79,7 +79,7 @@ class CrossAttention(nn.Module):
         self,
         x: torch.Tensor,
         kv: torch.Tensor,
-        mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
+        mask: Optional[Union[BlockMask, str]] = None,
         attn_impl: str = "sdpa",
     ) -> torch.Tensor:
         # B S D
@@ -107,13 +107,13 @@ class CrossAttention(nn.Module):
             output = flex_attention_comp(xq, xk, xv, block_mask=mask)
             output = output.transpose(1, 2).contiguous()  # B H S D -> B S H D
 
-        elif attn_impl == "xformers":
-            from xformers.ops.fmha import memory_efficient_attention
+        # elif attn_impl == "xformers":
+        #     from xformers.ops.fmha import memory_efficient_attention
 
-            assert mask is None or isinstance(mask, AttentionBias)
-            xq, xk, xv = [t.reshape(1, -1, *t.shape[2:]) for t in (xq, xk, xv)]
-            output = memory_efficient_attention(xq, xk, xv, attn_bias=mask)
-            output = output.view(output_shape)
+        #     assert mask is None or isinstance(mask)
+        #     xq, xk, xv = [t.reshape(1, -1, *t.shape[2:]) for t in (xq, xk, xv)]
+        #     output = memory_efficient_attention(xq, xk, xv, attn_bias=mask)
+        #     output = output.view(output_shape)
 
         elif attn_impl == "sdpa":
             xq, xk, xv = map(lambda e: e.transpose(1, 2), (xq, xk, xv))
@@ -191,7 +191,7 @@ class GlobalTransformer(BaseTransformer):
         tokens: torch.Tensor,
         tok_idx: Optional[torch.Tensor] = None,
         embeds: Optional[torch.Tensor] = None,
-        mask: Optional[Union[BlockMask, AttentionBias, torch.Tensor, str]] = None,
+        mask: Optional[Union[BlockMask, torch.Tensor, str]] = None,
         cache: Optional[List[Tuple[torch.Tensor, torch.Tensor, int]]] = None,
     ):
         """
