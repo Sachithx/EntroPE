@@ -1,5 +1,3 @@
-"""EntroPE Backbone Model for Time Series Forecasting"""
-
 __all__ = ['EntroPE_backbone']
 
 import torch
