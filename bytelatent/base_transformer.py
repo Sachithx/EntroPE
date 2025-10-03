@@ -14,18 +14,10 @@ from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     flex_attention,
 )
-# from xformers.ops import AttentionBias, fmha
 
 from bytelatent.tokenizers.constants import EOS_ID
 
 logger = logging.getLogger()
-
-# try:
-#     from apex.normalization.fused_layer_norm import FusedRMSNorm
-
-#     RMSNorm = FusedRMSNorm
-# except (ImportError, ModuleNotFoundError):
-#     logging.debug("Apex not found. Using nn.RMSNorm")
 
 RMSNorm = nn.RMSNorm
 
@@ -389,21 +381,7 @@ class Attention(nn.Module):
         xk = repeat_kv(xk, self.heads_per_group, dim=2)
         xv = repeat_kv(xv, self.heads_per_group, dim=2)
 
-        if attn_impl == "flex_attention":
-            assert mask is None or isinstance(mask, BlockMask)
-            xq, xk, xv = map(lambda e: e.transpose(1, 2), (xq, xk, xv))
-            output = flex_attention_comp(xq, xk, xv, block_mask=mask)
-            output = output.transpose(1, 2).contiguous()  # B H S D -> B S H D
-
-        # elif attn_impl == "xformers":
-        #     assert mask is None or isinstance(mask)
-        #     query_shape = xq.shape
-        #     xq, xk, xv = _reshape_for_attn_bias(mask, xq, xk, xv)
-        #     output = fmha.memory_efficient_attention(xq, xk, xv, attn_bias=mask)
-        #     output = output.view(query_shape)
-        #     # This uses B S H D instead of B H S D of pytorch
-
-        elif attn_impl == "sdpa":
+        if attn_impl == "sdpa":
             xq, xk, xv = map(lambda e: e.transpose(1, 2), (xq, xk, xv))
             assert mask is None or isinstance(mask, (str, torch.Tensor))
             is_causal = (mask == "causal") if isinstance(mask, str) else False

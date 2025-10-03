@@ -133,38 +133,6 @@ def create_causal_mask(
     tokens: torch.Tensor | None = None,
     sliding_window: int | None = None,
 ):
-    # if attn_impl == "xformers":
-    #     if attn_bias_type is None:
-    #         return fmha.attn_bias.LowerTriangularMask()
-    #     elif attn_bias_type == "causal":
-    #         assert sliding_window is None
-    #         return fmha.attn_bias.LowerTriangularMask()
-    #     elif attn_bias_type == "block_causal":
-    #         print(
-    #             "Block causal attention is not implemented for xformers, using causal instead"
-    #         )
-
-    #         assert sliding_window is None
-    #         assert eos_id is not None
-    #         assert tokens is not None
-    #         return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-    #             q_seqlen=tokens_to_seqlen(tokens, eos_id)
-    #         )
-    #     elif attn_bias_type == "local_block_causal":
-    #         assert sliding_window is not None
-    #         assert eos_id is not None
-    #         assert tokens is not None
-    #         # print(fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-    #         #     q_seqlen=tokens_to_seqlen(tokens, eos_id)
-    #         # ).make_local_attention(sliding_window)
-    #         # )
-    #         return fmha.attn_bias.BlockDiagonalCausalMask.from_seqlens(
-    #             q_seqlen=tokens_to_seqlen(tokens, eos_id)
-    #         ).make_local_attention(sliding_window)
-    #     else:
-    #         return fmha.attn_bias.LocalAttentionFromBottomRightMask(
-    #             window_left=sliding_window - 1, window_right=0
-            # )
     if attn_impl == "sdpa":
         BLT_SUPPRESS_ATTN_ERROR = int(os.environ.get("BLT_SUPPRESS_ATTN_ERROR", 0))
 
@@ -177,10 +145,6 @@ def create_causal_mask(
             raise ValueError(
                 "SDPA attention being used, which doesn't have specialized attention implementations for block_causal and local_block_causal attention. To suppress this error and run the model anyway, set the environment variable BLT_SUPPRESS_ATTN_ERROR=1"
             )
-    elif attn_impl == "flex_attention":
-        return create_block_mask(causal_mask, None, None, seqlen, seqlen)
-    elif attn_impl == "fmha":
-        return None
     else:
         raise NotImplementedError(
             f"Attention {attn_impl} with {sliding_window} sliding window not implemented"

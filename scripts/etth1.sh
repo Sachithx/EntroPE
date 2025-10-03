@@ -15,20 +15,20 @@ data_name=ETTh1
 enc_in=7
 seq_len=96
 
-quant_range=3
-dim=8
+quant_range=4
+dim=16
 multiple_of=128
-heads=2
-layers=1
+heads=4
+layers=2
 batch_size=64
 learning_rate=0.001
-dropout=0.02
+dropout=0.1
 monotonicity=1
-patching_threshold=0.2
-patching_threshold_add=0.01
+patching_threshold=0.3
+patching_threshold_add=0.0001
 max_patch_length=8
-train_epochs=100
-patience=10
+train_epochs=180
+patience=80
 
 
 for random_seed in 2025 
