@@ -1,5 +1,9 @@
 # EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting
 
+<div align="center">
+<img src="assets/entrope_logo.png" alt="Main Architecture" width="600">
+</div>
+
 This repository contains the official implementation of the paper:
 > **EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting**  
 > *Under review.*
