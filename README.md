@@ -1,5 +1,5 @@
 <div align="center">
-<img src="assets/entrope_logo.png" alt="Main Architecture" width="300">
+<img src="assets/logo.png" alt="Main Architecture" width="300">
 </div>
 
 # Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting
