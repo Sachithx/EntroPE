@@ -1,4 +1,3 @@
-CUDA_VISIBLE_DEVICES=1
 if [ ! -d "./logs" ]; then
     mkdir ./logs
 fi
@@ -17,19 +16,19 @@ enc_in=7
 seq_len=96
 
 quant_range=3
-dim=8
-multiple_of=64
+dim=16
+multiple_of=256
 heads=2
 layers=1
 batch_size=256
-learning_rate=0.0001
-dropout=0.01
+learning_rate=0.001
+dropout=0.1
 monotonicity=1
 patching_threshold=0.2
 patching_threshold_add=0.01
-max_patch_length=24
+max_patch_length=8
 train_epochs=100
-patience=20
+patience=10
 
 
 for random_seed in 2025 
@@ -50,7 +49,7 @@ do
         --seq_len $seq_len \
         --pred_len $pred_len \
         --enc_in $enc_in \
-        --vocab_size 256 \
+        --vocab_size 128 \
         --quant_range $quant_range \
         --n_layers_local_encoder $layers \
         --n_layers_local_decoder $layers \

@@ -28,7 +28,7 @@ class TrainingConfig:
     vocab_size = 256
     
     # Data Configuration
-    dataset_name = 'ETTm2'  # Example dataset
+    dataset_name = 'ETTh1'  # Example dataset
     features = 'M'
     quant_range = 3
     batch_size = 128

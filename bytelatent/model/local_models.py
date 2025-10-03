@@ -262,15 +262,15 @@ class LocalEncoder(LocalModelBase):
 
         bs, seqlen = tokens.shape
 
-        # if mask is None:
-        #     mask = create_causal_mask(
-        #         seqlen,
-        #         self.attn_impl,
-        #         self.attn_bias_type,
-        #         sliding_window=self.sliding_window,
-        #         tokens=tokens,
-        #         eos_id=self.eos_id,
-        #     )
+        if mask is None:
+            mask = create_causal_mask(
+                seqlen,
+                self.attn_impl,
+                self.attn_bias_type,
+                sliding_window=self.sliding_window,
+                tokens=tokens,
+                eos_id=self.eos_id,
+            )
 
         # ----------------------------------------------
         #           Token Embedding 
@@ -373,15 +373,15 @@ class LocalDecoder(LocalModelBase):
         bs, seqlen = tokens.shape
         assert embeds is not None, "Embeddings must be provided"
 
-        # if mask is None:
-        #     mask = create_causal_mask(
-        #         seqlen,
-        #         self.attn_impl,
-        #         self.attn_bias_type,
-        #         sliding_window=self.sliding_window,
-        #         tokens=tokens,
-        #         eos_id=self.eos_id,
-        #     )
+        if mask is None:
+            mask = create_causal_mask(
+                seqlen,
+                self.attn_impl,
+                self.attn_bias_type,
+                sliding_window=self.sliding_window,
+                tokens=tokens,
+                eos_id=self.eos_id,
+            )
 
         h = embeds
 
@@ -402,12 +402,12 @@ class LocalDecoder(LocalModelBase):
         #     # Suppose h: [bs, seq_len, dim]
         #     seq_len = h.size(1)
         
-        # device = h.device
+        device = h.device
 
-        # pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
-        # pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
+        pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
+        pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
 
-        # h = h + pos_emb
+        h = h + pos_emb
 
 
         h = F.dropout(h, p=self.dropout, training=self.training)
