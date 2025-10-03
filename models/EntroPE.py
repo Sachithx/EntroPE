@@ -1,90 +1,82 @@
-__all__ = ['EntroPE']
+"""EntroPE Model for Time Series Forecasting"""
 
-# Cell
-from typing import Callable, Optional
+__all__ = ['Model']
+
+from typing import Optional
 import torch
 from torch import nn
 from torch import Tensor
-# import torch.nn.functional as F
-# import numpy as np
 
 from layers.EntroPE_backbone import EntroPE_backbone
-# from layers.PatchTST_layers import series_decomp
 
 
 class Model(nn.Module):
-    def __init__(self, configs, max_seq_len:Optional[int]=1024, d_k:Optional[int]=None, d_v:Optional[int]=None, norm:str='BatchNorm', attn_dropout:float=0., 
-                 act:str="gelu", key_padding_mask:bool='auto',padding_var:Optional[int]=None, attn_mask:Optional[Tensor]=None, res_attention:bool=True, 
-                 pre_norm:bool=False, store_attn:bool=False, pe:str='zeros', learn_pe:bool=True, pretrain_head:bool=False, head_type = 'flatten', verbose:bool=False, **kwargs):
-        
+    """
+    EntroPE model wrapper that handles input/output transformations
+    and optional decomposition.
+    
+    Args:
+        configs: Configuration object with model hyperparameters
+        pretrain_head: Whether to use pretraining head
+        head_type: Type of prediction head ('flatten' or custom)
+        verbose: Whether to print model information
+        **kwargs: Additional keyword arguments passed to backbone
+    """
+    
+    def __init__(self, configs, max_seq_len=1024, d_k=None, d_v=None, 
+                 norm='BatchNorm', attn_dropout=0., act="gelu", 
+                 key_padding_mask='auto', padding_var=None, attn_mask=None, 
+                 res_attention=True, pre_norm=False, store_attn=False, 
+                 pe='zeros', learn_pe=True, pretrain_head=False, 
+                 head_type='flatten', verbose=False, **kwargs):
         super().__init__()
         
-        # load parameters
-        c_in = configs.enc_in
-        context_window = configs.seq_len
-        target_window = configs.pred_len
-
-        dropout = configs.dropout
-        fc_dropout = configs.dropout
-        head_dropout = configs.dropout
-
-        individual = configs.individual
-
-        stride = configs.stride
-        padding_patch = configs.padding_patch
+        # Extract configuration parameters
+        self.decomposition = configs.decomposition
         
-        revin = configs.revin
-        affine = configs.affine
-        subtract_last = configs.subtract_last
-        
-        decomposition = configs.decomposition
-        kernel_size = configs.kernel_size
-        
-        
-        # model
-        self.decomposition = decomposition
-
-        # if self.decomposition:
-        #     self.decomp_module = series_decomp(kernel_size)
-        #     self.model_trend = PatchTST_backbone(c_in=c_in, context_window = context_window, target_window=target_window, patch_len=patch_len, stride=stride, 
-        #                           max_seq_len=max_seq_len, n_layers=n_layers, d_model=d_model,
-        #                           n_heads=n_heads, d_k=d_k, d_v=d_v, d_ff=d_ff, norm=norm, attn_dropout=attn_dropout,
-        #                           dropout=dropout, act=act, key_padding_mask=key_padding_mask, padding_var=padding_var, 
-        #                           attn_mask=attn_mask, res_attention=res_attention, pre_norm=pre_norm, store_attn=store_attn,
-        #                           pe=pe, learn_pe=learn_pe, fc_dropout=fc_dropout, head_dropout=head_dropout, padding_patch = padding_patch,
-        #                           pretrain_head=pretrain_head, head_type=head_type, individual=individual, revin=revin, affine=affine,
-        #                           subtract_last=subtract_last, verbose=verbose, **kwargs)
-        #     self.model_res = PatchTST_backbone(c_in=c_in, context_window = context_window, target_window=target_window, patch_len=patch_len, stride=stride, 
-        #                           max_seq_len=max_seq_len, n_layers=n_layers, d_model=d_model,
-        #                           n_heads=n_heads, d_k=d_k, d_v=d_v, d_ff=d_ff, norm=norm, attn_dropout=attn_dropout,
-        #                           dropout=dropout, act=act, key_padding_mask=key_padding_mask, padding_var=padding_var, 
-        #                           attn_mask=attn_mask, res_attention=res_attention, pre_norm=pre_norm, store_attn=store_attn,
-        #                           pe=pe, learn_pe=learn_pe, fc_dropout=fc_dropout, head_dropout=head_dropout, padding_patch = padding_patch,
-        #                           pretrain_head=pretrain_head, head_type=head_type, individual=individual, revin=revin, affine=affine,
-        #                           subtract_last=subtract_last, verbose=verbose, **kwargs)
-        # else:
+        # Build EntroPE backbone
         self.model = EntroPE_backbone(
-            configs, 
-            pretrain_head=pretrain_head, 
-            head_type=head_type, 
-            individual=individual, 
-            revin=revin, 
-            affine=affine,
-            subtract_last=subtract_last, 
+            configs=configs,
+            pretrain_head=pretrain_head,
+            head_type=head_type,
+            individual=configs.individual,
+            revin=configs.revin,
+            affine=configs.affine,
+            subtract_last=configs.subtract_last,
             **kwargs
-            )
+        )
+        
+        if verbose:
+            self._print_model_info(configs)
     
+    def _print_model_info(self, configs):
+        """Print model configuration information"""
+        print(f"EntroPE Model Configuration:")
+        print(f"  Input channels: {configs.enc_in}")
+        print(f"  Context window: {configs.seq_len}")
+        print(f"  Prediction window: {configs.pred_len}")
+        print(f"  Decomposition: {self.decomposition}")
+        print(f"  RevIN: {configs.revin}")
+        print(f"  Individual: {configs.individual}")
     
-    def forward(self, x):           # x: [Batch, Input length, Channel]
-        if self.decomposition:
-            res_init, trend_init = self.decomp_module(x)
-            res_init, trend_init = res_init.permute(0,2,1), trend_init.permute(0,2,1)  # x: [Batch, Channel, Input length]
-            res = self.model_res(res_init)
-            trend = self.model_trend(trend_init)
-            x = res + trend
-            x = x.permute(0,2,1)    # x: [Batch, Input length, Channel]
-        else:
-            x = x.permute(0,2,1)    # x: [Batch, Channel, Input length]
-            x = self.model(x)
-            x = x.permute(0,2,1)    # x: [Batch, Input length, Channel]
+    def forward(self, x):
+        """
+        Forward pass through the model.
+        
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, n_vars]
+            
+        Returns:
+            Output tensor of shape [batch_size, pred_len, n_vars]
+        """
+        # Transform: [batch_size, seq_len, n_vars] -> [batch_size, n_vars, seq_len]
+        x = x.permute(0, 2, 1)
+        
+        # Pass through backbone
+        x = self.model(x)
+        
+        # Transform back: [batch_size, n_vars, pred_len] -> [batch_size, pred_len, n_vars]
+        x = x.permute(0, 2, 1)
+        
         return x
+    
