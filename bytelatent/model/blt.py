@@ -15,7 +15,8 @@ from bytelatent.base_transformer import (
     SequenceModelWithOutput,
     TransformerBlock,
 )
-from bytelatent.data.patcher import Patcher, PatcherArgs
+from layers.Patcher import Patcher
+from bytelatent.data.patcher import PatcherArgs
 from bytelatent.model.latent_transformer import GlobalTransformer
 from bytelatent.model.local_models import LocalDecoder, LocalEncoder, LocalModelArgs
 from bytelatent.model.utils import downsample

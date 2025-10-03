@@ -5,7 +5,7 @@
     "n_embd": 16,
     "dropout": 0.1,
     "bias": false,
-    "vocab_size": 128,
+    "vocab_size": 256,
     "block_size": 96
   }
 }

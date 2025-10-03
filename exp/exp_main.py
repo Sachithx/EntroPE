@@ -1,6 +1,6 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
-from models import Informer, Autoformer, Transformer, DLinear, Linear, NLinear, EntroPE
+from models import EntroPE
 from utils.tools import EarlyStopping, adjust_learning_rate, visual, test_params_flop
 from utils.metrics import metric
 
@@ -86,13 +86,7 @@ class Exp_Main(Exp_Basic):
 
     def _build_model(self):
         model_dict = {
-            'Autoformer': Autoformer,
-            'Transformer': Transformer,
-            'Informer': Informer,
-            'DLinear': DLinear,
-            'NLinear': NLinear,
-            'Linear': Linear,
-            'EntroPE': EntroPE,
+            'EntroPE': EntroPE
         }
         model = model_dict[self.args.model].Model(self.args).float()
 
@@ -314,6 +308,8 @@ class Exp_Main(Exp_Basic):
 
             # Epoch evaluation
             epoch_duration = time.time() - epoch_time
+            print(f"Epoch: {epoch + 1} cost time: {epoch_duration}")
+            
             train_loss = np.average(train_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
@@ -536,4 +532,3 @@ class Exp_Main(Exp_Basic):
         
         wandb.finish()
         return
-    
