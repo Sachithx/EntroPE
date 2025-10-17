@@ -135,11 +135,11 @@ def _add_entrope_args(parser):
                         help='monotonic patching (1: True, 0: False)')
     
     # Regularization
-    parser.add_argument('--fc_dropout', type=float, default=0.05, 
+    parser.add_argument('--fc_dropout', type=float, default=0.1, 
                         help='fully connected layer dropout')
-    parser.add_argument('--head_dropout', type=float, default=0.05, 
+    parser.add_argument('--head_dropout', type=float, default=0.1, 
                         help='prediction head dropout')
-    parser.add_argument('--dropout', type=float, default=0.05, 
+    parser.add_argument('--dropout', type=float, default=0.1, 
                         help='general dropout rate')
     
     # Other EntroPE settings

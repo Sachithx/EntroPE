@@ -371,7 +371,7 @@ class Attention(nn.Module):
         xk = xk.view(bsz, seq_len, self.n_kv_heads, self.head_dim)
         xv = xv.view(bsz, seq_len, self.n_kv_heads, self.head_dim)
 
-        # xq, xk = apply_rotary_emb(xq, xk, 1, freq_cis[0:seq_len])
+        xq, xk = apply_rotary_emb(xq, xk, 1, freq_cis[0:seq_len])
 
         # This condition helps us be easily compatible
         # with inference by adding a pluggable KVCache

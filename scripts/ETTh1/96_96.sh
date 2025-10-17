@@ -20,20 +20,20 @@ dim=8
 multiple_of=256
 heads=1
 layers=1
-batch_size=64
+batch_size=128
 learning_rate=0.001
-dropout=0.1
+dropout=0.01
 monotonicity=1
 patching_threshold=0.25
 patching_threshold_add=0.15
-max_patch_length=8
+max_patch_length=12
 train_epochs=50
 patience=20
 
 
-for random_seed in 2025 2026 2027 2028 2029
+for random_seed in 2025 
 do
-    for pred_len in 96 192 336 720
+    for pred_len in 96
     do
         python -u run_longExp.py \
         --random_seed $random_seed \
