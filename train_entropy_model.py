@@ -30,7 +30,7 @@ class TrainingConfig:
     # Data Configuration
     dataset_name = 'ETTh1'  # Example dataset
     features = 'M'
-    quant_range = 3
+    quant_range = 1
     batch_size = 128
     seq_len = 96
     block_size = seq_len

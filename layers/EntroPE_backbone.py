@@ -112,7 +112,7 @@ class EntroPE_backbone(nn.Module):
             
             # Model architecture
             non_linearity="gelu",
-            use_rope=False,
+            use_rope=True,
             attn_impl="sdpa",
             attn_bias_type="causal",
             multiple_of=configs.multiple_of,

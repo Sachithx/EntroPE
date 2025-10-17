@@ -1,4 +1,4 @@
-# import numpy as np
+import numpy as np
 # import torch
 # import torch.nn.functional as F
 # import time
@@ -6,8 +6,8 @@
 # import os
 # import argparse
 # # from TLLM_data_provider.data_factory import data_provider
-# from data_provider.data_factory import data_provider
-# from chronos import MeanScaleUniformBins, ChronosConfig
+from data_provider.data_factory import data_provider
+from chronos import MeanScaleUniformBins, ChronosConfig
 # from pathlib import Path
 
 # device = 'cuda'
@@ -18,86 +18,86 @@
 # WANDB_ENTITY = None  # Set to your wandb username/team if needed
 # ENABLE_WANDB = False  # Set to False to disable wandb logging
 
-# import argparse  # Make sure this is imported
+import argparse  # Make sure this is imported
 
-# # def build_dataloader(dataset_name, features, seq_len, label_len, pred_len, flag, batch_size, pretrain):
-# def build_dataloader(dataset_name, features, seq_len, label_len, pred_len, flag, batch_size, embed='timeF'):
-#     args = argparse.Namespace(
-#         data=dataset_name if 'ETT' in dataset_name else 'custom',
-#         root_path='dataset/',
-#         data_path=f'{dataset_name}.csv',
-#         features=features,
-#         target='OT',  # target column, typically "OT" in ETT datasets
-#         freq='h' if 'h' in dataset_name else 't',
-#         seq_len=seq_len,
-#         label_len=label_len,
-#         pred_len=pred_len,
-#         embed=embed,
-#         batch_size=batch_size,
-#         num_workers=2
-#     )
+# def build_dataloader(dataset_name, features, seq_len, label_len, pred_len, flag, batch_size, pretrain):
+def build_dataloader(dataset_name, features, seq_len, label_len, pred_len, flag, batch_size, embed='timeF'):
+    args = argparse.Namespace(
+        data=dataset_name if 'ETT' in dataset_name else 'custom',
+        root_path='dataset/',
+        data_path=f'{dataset_name}.csv',
+        features=features,
+        target='OT',  # target column, typically "OT" in ETT datasets
+        freq='h' if 'h' in dataset_name else 't',
+        seq_len=seq_len,
+        label_len=label_len,
+        pred_len=pred_len,
+        embed=embed,
+        batch_size=batch_size,
+        num_workers=2
+    )
 
-#     dataset, loader = data_provider(args, flag=flag)
+    dataset, loader = data_provider(args, flag=flag)
 
-#     print(f"[INFO] {flag} set: {len(dataset)} samples, {len(loader)} batches")
-#     return dataset, loader
+    print(f"[INFO] {flag} set: {len(dataset)} samples, {len(loader)} batches")
+    return dataset, loader
 
 
-# def build_tokenizer(quant_range, vocab_size, context_length, prediction_length):
-#     """
-#     Build a tokenizer that maps byte values to tokens.
-#     """
-#     # Create a new config with prediction_length=1
-#     low_limit = -1 * quant_range
-#     high_limit = quant_range
+def build_tokenizer(quant_range, vocab_size, context_length, prediction_length):
+    """
+    Build a tokenizer that maps byte values to tokens.
+    """
+    # Create a new config with prediction_length=1
+    low_limit = -1 * quant_range
+    high_limit = quant_range
 
-#     tokenizer_config = ChronosConfig(
-#         tokenizer_class='MeanScaleUniformBins',
-#         tokenizer_kwargs={'low_limit': low_limit, 'high_limit': high_limit},
-#         context_length=context_length,
-#         prediction_length=prediction_length,   
-#         n_tokens=vocab_size,
-#         n_special_tokens=4,
-#         pad_token_id=-1,
-#         eos_token_id=0,
-#         use_eos_token=False,
-#         model_type='causal',
-#         num_samples=1,
-#         temperature=1.0,
-#         top_k=50,
-#         top_p=1.0
-#     )
+    tokenizer_config = ChronosConfig(
+        tokenizer_class='MeanScaleUniformBins',
+        tokenizer_kwargs={'low_limit': low_limit, 'high_limit': high_limit},
+        context_length=context_length,
+        prediction_length=prediction_length,   
+        n_tokens=vocab_size,
+        n_special_tokens=4,
+        pad_token_id=-1,
+        eos_token_id=0,
+        use_eos_token=False,
+        model_type='causal',
+        num_samples=1,
+        temperature=1.0,
+        top_k=50,
+        top_p=1.0
+    )
 
-#     # Create a new tokenizer with the updated config
-#     tokenizer = MeanScaleUniformBins(low_limit, high_limit, tokenizer_config)
-#     return tokenizer
+    # Create a new tokenizer with the updated config
+    tokenizer = MeanScaleUniformBins(low_limit, high_limit, tokenizer_config)
+    return tokenizer
 
-# def get_lr(iteration, max_iters, warmup_iters, learning_rate, min_lr, decay_lr=True):
-#     """
-#     Learning rate scheduler function
-#     Args:
-#         iteration: Current iteration
-#         max_iters: Total number of iterations
-#         warmup_iters: Number of warmup iterations
-#         learning_rate: Peak learning rate
-#         min_lr: Minimum learning rate
-#         decay_lr: Whether to decay learning rate after warmup
-#     Returns:
-#         lr: Learning rate for current iteration
-#     """
-#     # Linear warmup
-#     if iteration < warmup_iters:
-#         return learning_rate * (iteration / warmup_iters)
+def get_lr(iteration, max_iters, warmup_iters, learning_rate, min_lr, decay_lr=True):
+    """
+    Learning rate scheduler function
+    Args:
+        iteration: Current iteration
+        max_iters: Total number of iterations
+        warmup_iters: Number of warmup iterations
+        learning_rate: Peak learning rate
+        min_lr: Minimum learning rate
+        decay_lr: Whether to decay learning rate after warmup
+    Returns:
+        lr: Learning rate for current iteration
+    """
+    # Linear warmup
+    if iteration < warmup_iters:
+        return learning_rate * (iteration / warmup_iters)
     
-#     # Decay phase (if enabled)
-#     if decay_lr:
-#         # Cosine decay from learning_rate to min_lr
-#         decay_ratio = (iteration - warmup_iters) / (max_iters - warmup_iters)
-#         coeff = 0.5 * (1.0 + np.cos(np.pi * decay_ratio))  # Cosine decay
-#         return min_lr + coeff * (learning_rate - min_lr)
-#     else:
-#         # Constant learning rate after warmup
-#         return learning_rate
+    # Decay phase (if enabled)
+    if decay_lr:
+        # Cosine decay from learning_rate to min_lr
+        decay_ratio = (iteration - warmup_iters) / (max_iters - warmup_iters)
+        coeff = 0.5 * (1.0 + np.cos(np.pi * decay_ratio))  # Cosine decay
+        return min_lr + coeff * (learning_rate - min_lr)
+    else:
+        # Constant learning rate after warmup
+        return learning_rate
     
 
 # def create_static_patch_lengths(batch_size, seq_len, patch_length=8):
