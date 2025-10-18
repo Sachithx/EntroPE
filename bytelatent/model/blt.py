@@ -1,16 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-"""
-ByteLatentTransformer (BLT) - A byte-level language model with dynamic patching.
-
-This module implements the ByteLatentTransformer architecture, which processes
-byte sequences by dynamically segmenting them into patches using entropy-based
-patching. The model consists of three main components:
-    1. Local Encoder: Encodes byte sequences into representations
-    2. Global Transformer: Processes patch-level representations
-    3. Local Decoder: Decodes patch representations back to bytes
-"""
-
+from enum import Enum, auto
 from typing import Optional
 
 import torch
@@ -28,7 +18,7 @@ from layers.Patcher import Patcher, PatcherArgs
 from bytelatent.model.latent_transformer import GlobalTransformer
 from bytelatent.model.local_models import LocalDecoder, LocalEncoder, LocalModelArgs
 from bytelatent.model.utils import downsample
-from bytelatent.tokenizers.constants import BOE_ID, BOS_ID, EOS_ID, PAD_ID
+from bytelatent.tokenizers.constants import BOE_ID, BOS_ID, EOS_ID, OFFSET, PAD_ID
 
 
 # ============================================================================
@@ -36,23 +26,11 @@ from bytelatent.tokenizers.constants import BOE_ID, BOS_ID, EOS_ID, PAD_ID
 # ============================================================================
 
 def causal_mask(b, h, q_idx, kv_idx):
-    """
-    Causal mask for attention ensuring queries only attend to past tokens.
-    
-    Args:
-        b: Batch index
-        h: Head index
-        q_idx: Query position index
-        kv_idx: Key/Value position index
-    
-    Returns:
-        bool: True if attention is allowed (q_idx >= kv_idx)
-    """
+    """Causal mask for attention."""
     return q_idx >= kv_idx
 
 
 def get_encoder_dim_token_emb(args):
-    """Compute token embedding dimension for encoder."""
     if args.dim_token is not None:
         return args.dim_token
     elif args.use_local_encoder_transformer:
@@ -62,7 +40,6 @@ def get_encoder_dim_token_emb(args):
 
 
 def get_encoder_dim_patch_emb(args):
-    """Compute patch embedding dimension for encoder."""
     if args.cross_attn_encoder:
         if args.cross_attn_init_by_pooling:
             return args.dim_local_encoder
@@ -72,9 +49,7 @@ def get_encoder_dim_patch_emb(args):
 
 
 def get_global_dim_patch_emb(args):
-    """Compute patch embedding dimension for global transformer."""
     dim_token_emb = get_encoder_dim_token_emb(args)
-    
     if args.cross_attn_encoder:
         return dim_token_emb * args.cross_attn_k
     elif (
@@ -85,13 +60,14 @@ def get_global_dim_patch_emb(args):
         return dim_token_emb * args.patch_size
     else:
         return dim_token_emb * sum(
-            pooling in args.downsampling_by_pooling
-            for pooling in ["avg", "min", "max"]
+            [
+                pooling in args.downsampling_by_pooling
+                for pooling in ["avg", "min", "max"]
+            ]
         )
 
 
 def get_decoder_dim_token_emb(args):
-    """Compute token embedding dimension for decoder."""
     if args.share_encoder_decoder_emb:
         return get_encoder_dim_token_emb(args)
     elif args.dim_token is not None:
@@ -101,40 +77,19 @@ def get_decoder_dim_token_emb(args):
 
 
 def fill_tokens(tokens, patch_size, fill_id):
-    """
-    Pad tokens to make sequence length divisible by patch_size.
-    
-    Args:
-        tokens: Input token tensor of shape (batch_size, seq_len)
-        patch_size: Size of each patch
-        fill_id: Token ID to use for padding
-    
-    Returns:
-        Padded token tensor
-    """
+    """Pad tokens to make sequence length divisible by patch_size."""
     batch_size, seq_len = tokens.shape
     if seq_len % patch_size == 0:
         return tokens
-    
-    remaining = patch_size - seq_len % patch_size
-    final_padding = tokens.new(batch_size, remaining).fill_(fill_id)
-    return torch.cat((tokens, final_padding), dim=1)
+    else:
+        remaining = patch_size - seq_len % patch_size
+        final_padding = tokens.new(batch_size, remaining).fill_(fill_id)
+        return torch.cat((tokens, final_padding), dim=1)
 
 
 def patch_ids_from_lengths(patch_lengths, seq_len):
-    """
-    Generate patch IDs from patch lengths.
-    
-    Args:
-        patch_lengths: Tensor of shape (batch_size, num_patches) containing patch lengths
-        seq_len: Total sequence length
-    
-    Returns:
-        Tensor of shape (batch_size, seq_len) with patch IDs for each position
-    """
+    """Generate patch IDs from patch lengths."""
     bs, num_patches = patch_lengths.shape
-    
-    # Create cumulative sum of patch lengths
     cum_d = torch.cat(
         [
             torch.zeros(bs, 1, dtype=patch_lengths.dtype, device=patch_lengths.device),
@@ -142,39 +97,21 @@ def patch_ids_from_lengths(patch_lengths, seq_len):
         ],
         dim=-1,
     )
-    
-    # Compute patch ID for each position
-    patch_ids = (
-        cum_d.unsqueeze(-1) <= torch.arange(seq_len, device=cum_d.device)
-    ).sum(dim=-2) - 1
-    
-    # Validate patch IDs
+    patch_ids = (cum_d.unsqueeze(-1) <= torch.arange(seq_len, device=cum_d.device)).sum(
+        dim=-2
+    ) - 1
     assert not (
-        torch.max(patch_ids) > num_patches or torch.min(patch_ids) < 0
-    ), f"Invalid patch_ids: max={torch.max(patch_ids)}, min={torch.min(patch_ids)}, num_patches={num_patches}"
-    
+        torch.max(patch_ids) > patch_lengths.shape[-1] or torch.min(patch_ids) < 0
+    ), f"Invalid patch_ids: max={torch.max(patch_ids)}, min={torch.min(patch_ids)}"
     return patch_ids
 
 
 def create_patch_mask_from_ids(
     patch_ids, num_patches, window=None, patches_as_queries=False
 ):
-    """
-    Create attention mask from patch IDs.
-    
-    Args:
-        patch_ids: Tensor of shape (batch_size, seq_len) containing patch IDs
-        num_patches: Total number of patches
-        window: Optional window size for local attention
-        patches_as_queries: If True, patches are queries; otherwise tokens are queries
-    
-    Returns:
-        Boolean mask tensor of shape (batch_size, q_len, kv_len)
-    """
+    """Create attention mask from patch IDs."""
     bs, seq_len = patch_ids.shape
-    
     if not patches_as_queries:
-        # Tokens as queries, patches as keys
         q_ids = patch_ids.unsqueeze(-1).expand(bs, seq_len, num_patches)
         kv_ids = (
             torch.arange(num_patches, device=patch_ids.device)
@@ -183,7 +120,6 @@ def create_patch_mask_from_ids(
             .expand(bs, seq_len, num_patches)
         )
     else:
-        # Patches as queries, tokens as keys
         kv_ids = patch_ids.unsqueeze(1).expand(bs, num_patches, seq_len)
         q_ids = (
             torch.arange(num_patches, device=patch_ids.device)
@@ -192,12 +128,10 @@ def create_patch_mask_from_ids(
             .expand(bs, num_patches, seq_len)
         )
     
-    # Create mask based on window
     if window is None:
         mask = q_ids == kv_ids
     else:
         mask = (kv_ids <= q_ids) & (q_ids < kv_ids + window)
-    
     return mask
 
 
@@ -210,25 +144,9 @@ def cross_attn_mask(
     window=None,
     block_mask=True,
 ):
-    """
-    Create cross-attention mask for patch-token attention.
-    
-    Args:
-        patch_ids: Patch IDs for each token position
-        patch_lengths: Length of each patch
-        N: Sequence length
-        patches_as_queries: Whether patches are queries
-        cross_attn_k: Number of cross-attention keys per patch
-        window: Optional attention window size
-        block_mask: Whether to use block mask (flex attention) or dense mask
-    
-    Returns:
-        Attention mask (BlockMask if block_mask=True, else dense tensor)
-    """
+    """Create cross-attention mask."""
     bs = patch_ids.shape[0]
-    
     with torch.no_grad():
-        # Create base patch mask
         cross_mask = create_patch_mask_from_ids(
             patch_ids,
             patch_lengths.shape[1],
@@ -239,11 +157,9 @@ def cross_attn_mask(
         q_len = patch_lengths.shape[1] * cross_attn_k if patches_as_queries else N
         kv_len = N if patches_as_queries else patch_lengths.shape[1] * cross_attn_k
         
-        assert cross_mask.shape == (bs, q_len, kv_len), \
-            f"Mask shape mismatch: {cross_mask.shape} != {(bs, q_len, kv_len)}"
+        assert cross_mask.shape == (bs, q_len, kv_len)
 
         if block_mask:
-            # Use flex attention block mask
             def patch_mask(b, h, q_idx, kv_idx):
                 return cross_mask[b, q_idx, kv_idx]
 
@@ -256,12 +172,9 @@ def cross_attn_mask(
                 _compile=True,
             )
         else:
-            # Use dense attention mask
             return torch.where(
-                cross_mask, 
-                torch.tensor(0.0), 
-                torch.tensor(float("-inf"))
-            ).unsqueeze(1)  # Add head dimension
+                cross_mask, torch.tensor(0.0), torch.tensor(float("-inf"))
+            ).unsqueeze(1)
 
 
 def get_blt_input(
@@ -271,29 +184,15 @@ def get_blt_input(
     patch_size: int,
     boe_id: int,
 ):
-    """
-    Prepare encoder and decoder tokens for BLT processing.
-    
-    Args:
-        tokens: Input tokens of shape (batch_size, seq_len)
-        enforce_patch_size_multiple: Whether to pad to patch_size multiple
-        nb_boe: Number of beginning-of-epoch tokens to prepend
-        patch_size: Size of each patch
-        boe_id: Token ID for beginning-of-epoch
-    
-    Returns:
-        Tuple of (encoder_tokens, global_tokens, decoder_tokens)
-    """
+    """Prepare encoder and decoder tokens for BLT."""
     batch_size, seq_len = tokens.shape
     local_encoder_tokens = tokens
     local_decoder_tokens = tokens
 
-    # Prepend BOE tokens if needed
     if nb_boe > 0:
         padded_patch = tokens.new(batch_size, nb_boe).fill_(boe_id)
         local_encoder_tokens = torch.cat((padded_patch, local_encoder_tokens), dim=1)
 
-    # Pad to patch size multiple if required
     if enforce_patch_size_multiple and local_encoder_tokens.shape[-1] % patch_size != 0:
         local_encoder_tokens = fill_tokens(local_encoder_tokens, patch_size, boe_id)
 
@@ -305,8 +204,6 @@ def get_blt_input(
 # ============================================================================
 
 class ByteLatentTransformerArgs(BaseTransformerArgs):
-    """Configuration arguments for ByteLatentTransformer model."""
-    
     # Basic configuration
     seed: int = 2025
     vocab_size: int = 256
@@ -338,7 +235,7 @@ class ByteLatentTransformerArgs(BaseTransformerArgs):
     pad_to_max_length: bool = False
     share_encoder_decoder_emb: bool = True
 
-    # Cross attention configuration
+    # Cross attention
     cross_attn_encoder: bool = False
     cross_attn_decoder: bool = False
     cross_attn_window_encoder: int | None = None
@@ -350,7 +247,7 @@ class ByteLatentTransformerArgs(BaseTransformerArgs):
     cross_attn_use_flex_attention: bool = True
     cross_attn_init_by_pooling: bool = False
 
-    # Encoder hash configurations (kept for compatibility)
+    # Encoder hash configurations (kept for compatibility but unused)
     encoder_hash_byte_group_size: list | None = None
     encoder_hash_byte_group_vocab: int = 30000
     encoder_hash_byte_group_nb_functions: int = 3
@@ -414,15 +311,7 @@ class ByteLatentTransformerArgs(BaseTransformerArgs):
 # ============================================================================
 
 def create_global_transformer(args: ByteLatentTransformerArgs) -> GlobalTransformer:
-    """
-    Create global transformer with appropriate arguments.
-    
-    Args:
-        args: Model configuration arguments
-    
-    Returns:
-        Configured GlobalTransformer instance
-    """
+    """Create global transformer with appropriate arguments."""
     global_args = args.model_copy(
         deep=True,
         update=dict(
@@ -441,15 +330,7 @@ def create_global_transformer(args: ByteLatentTransformerArgs) -> GlobalTransfor
 
 
 def create_local_encoder(args: ByteLatentTransformerArgs) -> LocalEncoder:
-    """
-    Create local encoder with appropriate arguments.
-    
-    Args:
-        args: Model configuration arguments
-    
-    Returns:
-        Configured LocalEncoder instance
-    """
+    """Create local encoder with appropriate arguments."""
     local_encoder_args = LocalModelArgs(
         dim=args.dim_local_encoder,
         n_layers=args.n_layers_local_encoder,
@@ -489,15 +370,7 @@ def create_local_encoder(args: ByteLatentTransformerArgs) -> LocalEncoder:
 
 
 def create_local_decoder(args: ByteLatentTransformerArgs) -> LocalDecoder:
-    """
-    Create local decoder with appropriate arguments.
-    
-    Args:
-        args: Model configuration arguments
-    
-    Returns:
-        Configured LocalDecoder instance
-    """
+    """Create local decoder with appropriate arguments."""
     local_decoder_args = LocalModelArgs(
         dim=args.dim_local_decoder,
         n_layers=args.n_layers_local_decoder,
@@ -543,31 +416,11 @@ def create_local_decoder(args: ByteLatentTransformerArgs) -> LocalDecoder:
 
 class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
     """
-    ByteLatentTransformer (BLT) - A byte-level language model with dynamic patching.
+    ByteLatentTransformer (BLT) - A byte-level language model that processes
+    byte sequences by dynamically segmenting them into patches.
     
-    BLT processes byte sequences by dynamically segmenting them into patches based on
-    entropy. The architecture consists of three main components:
-    
-    1. Local Encoder: Processes byte-level tokens and encodes them into representations
-    2. Global Transformer: Operates on patch-level representations for long-range dependencies
-    3. Local Decoder: Decodes patch representations back to byte-level predictions
-    
-    This hierarchical approach enables efficient processing of long sequences while
-    maintaining byte-level granularity.
-    
-    Args:
-        args: Configuration arguments for the model
-    
-    Example:
-        >>> args = ByteLatentTransformerArgs(
-        ...     dim_global=512,
-        ...     dim_local_encoder=256,
-        ...     dim_local_decoder=256,
-        ...     patch_size=8,
-        ... )
-        >>> model = ByteLatentTransformer(args)
-        >>> tokens = torch.randint(0, 256, (2, 100))  # batch_size=2, seq_len=100
-        >>> output = model(tokens)
+    Uses local encoders, global transformers, and local decoders for efficient
+    encoding and decoding of byte sequences with patch-based processing.
     """
 
     def __init__(self, args: ByteLatentTransformerArgs):
@@ -600,7 +453,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
         self.global_transformer = create_global_transformer(args)
         self.local_decoder = create_local_decoder(args)
 
-        # Patcher module for dynamic segmentation
+        # Patcher module
         if args.patch_in_forward:
             self.patcher = Patcher(
                 PatcherArgs(
@@ -614,12 +467,12 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
                     patching_batch_size=args.patching_batch_size,
                 )
             )
-        
+
         # Initialize weights automatically
         self.init_weights()
 
     def get_output_seq_len(self):
-        """Return maximum sequence length supported by the model."""
+        """Return maximum sequence length."""
         return self.max_seqlen
 
     def forward(
@@ -630,26 +483,16 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
         """
         Forward pass of ByteLatentTransformer.
         
-        Process flow:
-        1. Prepare inputs with optional BOE tokens
-        2. Generate or use provided patch lengths
-        3. Encode bytes with local encoder
-        4. Downsample to patch representations
-        5. Process patches with global transformer
-        6. Decode with local decoder using cross-attention
-        
         Args:
             tokens: Input token IDs of shape (batch_size, seq_len)
-            patch_lengths: Optional precomputed patch lengths of shape (batch_size, num_patches)
+            patch_lengths: Optional precomputed patch lengths (batch_size, num_patches)
         
         Returns:
-            Output representations of shape (batch_size, seq_len, dim)
+            Output logits of shape (batch_size, seq_len, vocab_size)
         """
         bs, N = tokens.shape
 
-        # ====================================================================
-        # Input Preparation
-        # ====================================================================
+        # Prepare inputs
         nb_boe = int(0 if self.patching_mode != "" else self.patch_size - 1)
         local_encoder_tokens, _, local_decoder_tokens = get_blt_input(
             tokens=tokens,
@@ -659,34 +502,24 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
             boe_id=self.boe_id,
         )
 
-        # ====================================================================
-        # Patching
-        # ====================================================================
+        # Generate patches
         if patch_lengths is None:
-            assert hasattr(self, "patcher"), \
-                "Patcher not defined and no patch_lengths provided"
+            assert hasattr(self, "patcher"), "Patcher not defined and no patch_lengths passed"
             patch_lengths, _ = self.patcher.patch(
                 local_encoder_tokens,
                 include_next_token=True,
                 threshold=self.patcher.threshold,
             )
         else:
-            # Adjust first patch length if BOE tokens were added
             if nb_boe > 0:
                 patch_lengths[:, 0] += nb_boe
 
-        assert torch.min(patch_lengths) >= 0, \
-            f"Patch lengths must be non-negative, got min={torch.min(patch_lengths)}"
+        assert torch.min(patch_lengths) >= 0, "Patch lengths must be non-negative"
 
-        # Generate patch IDs from lengths
-        patch_ids = patch_ids_from_lengths(
-            patch_lengths, 
-            local_encoder_tokens.shape[-1]
-        )
+        # Generate patch IDs
+        patch_ids = patch_ids_from_lengths(patch_lengths, local_encoder_tokens.shape[-1])
 
-        # ====================================================================
-        # Local Encoder
-        # ====================================================================
+        # Prepare cross-attention mask for encoder if needed
         cross_attn_mask_enc = None
         if self.cross_attn_encoder:
             cross_attn_mask_enc = cross_attn_mask(
@@ -697,6 +530,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
                 block_mask=self.cross_attn_use_flex_attention,
             )
 
+        # Local encoder
         (h_encoder, h_cross), _ = self.local_encoder(
             tokens=local_encoder_tokens,
             embeds=None,
@@ -706,25 +540,17 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
             patch_ids=patch_ids,
         )
 
-        # ====================================================================
-        # Downsampling to Patch Representations
-        # ====================================================================
+        # Downsample to patch representations
         if not self.cross_attn_encoder:
             h = downsample(
-                h_encoder, 
-                patch_lengths.shape[1], 
-                patch_lengths, 
-                patch_ids,
+                h_encoder, patch_lengths.shape[1], patch_lengths, patch_ids,
                 downsampling_by_pooling=self.downsampling_by_pooling,
                 patch_size=self.patch_size,
             )
         else:
             h = h_cross.view(bs, patch_lengths.shape[1], -1)
 
-        # ====================================================================
-        # Global Transformer
-        # ====================================================================
-        # Create global tokens with EOS markers
+        # Global transformer
         global_tokens = tokens.new(h.shape[0], h.shape[1]).fill_(self.boe_id)
         rows, cols = torch.where(local_encoder_tokens == self.eos_id)
         eos_patch_ids = patch_ids[rows, cols]
@@ -732,10 +558,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
 
         h, _ = self.global_transformer(embeds=h, tokens=global_tokens)
 
-        # ====================================================================
-        # Local Decoder
-        # ====================================================================
-        # Extract decoder embeddings (remove BOE tokens)
+        # Prepare decoder inputs
         dec_embeds = h_encoder[:, nb_boe : nb_boe + N, :]
 
         # Prepare cross-attention mask for decoder if needed
@@ -749,7 +572,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
                 block_mask=self.cross_attn_use_flex_attention,
             )
 
-        # Decode to output representations
+        # Local decoder
         output, _ = self.local_decoder(
             embeds=dec_embeds,
             patch_embeds=h,
@@ -760,19 +583,8 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
         return output
 
     def init_weights(self):
-        """
-        Initialize all model weights.
-        
-        This method initializes weights for all submodules:
-        - Local encoder: token embeddings, position embeddings, transformer layers
-        - Global transformer: patch-level processing layers
-        - Local decoder: decoder layers and output projection
-        
-        Each component uses appropriate initialization schemes:
-        - Embeddings: Truncated normal with std = dim^(-0.5)
-        - Linear layers: Truncated normal with depth-aware scaling
-        - RoPE: Reset to default parameters
-        """
+        """Initialize all model weights."""
         self.local_encoder.init_weights()
         self.global_transformer.init_weights()
         self.local_decoder.init_weights()
+    

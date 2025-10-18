@@ -2,7 +2,7 @@
   "entropy_model": {
     "n_layer": 2,
     "n_head": 4,
-    "n_embd": 16,
+    "n_embd": 32,
     "dropout": 0.1,
     "bias": false,
     "vocab_size": 256,

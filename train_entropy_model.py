@@ -22,13 +22,13 @@ class TrainingConfig:
     # Model Architecture
     n_layer = 2
     n_head = 4
-    n_embd = 16
-    dropout = 0.1
+    n_embd = 32
+    dropout = 0.01
     bias = False
     vocab_size = 256
     
     # Data Configuration
-    dataset_name = 'ETTh2'  # Example dataset
+    dataset_name = 'ETTh1'  # Example dataset
     features = 'M'
     quant_range = 3
     batch_size = 128

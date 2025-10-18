@@ -26,7 +26,7 @@ dropout=0.1
 monotonicity=1
 patching_threshold=0.25
 patching_threshold_add=0.15
-max_patch_length=8
+max_patch_length=48
 train_epochs=50
 patience=20
 
