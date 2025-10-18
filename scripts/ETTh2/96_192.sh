@@ -15,20 +15,20 @@ data_name=ETTh2
 enc_in=7
 seq_len=96
 
-quant_range=3
+quant_range=1
 dim=8
-multiple_of=256
-heads=1
-layers=2
-batch_size=256
-learning_rate=0.001
-dropout=0.1
+multiple_of=128
+heads=2
+layers=1
+batch_size=420
+learning_rate=0.0001
+dropout=0.2
 monotonicity=1
-patching_threshold=0.25
+patching_threshold=0.3
 patching_threshold_add=0.15
-max_patch_length=8
+max_patch_length=24
 train_epochs=50
-patience=20
+patience=40
 
 
 for random_seed in 2025 2024 2023 2022 2021

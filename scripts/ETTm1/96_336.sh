@@ -9,31 +9,31 @@ fi
 model_name=EntroPE
 root_path_name=./dataset/
 entropy_model_checkpoint_dir=./entropy_model_checkpoints/
-data_path_name=ETTh1.csv
-model_id_name=ETTh1
-data_name=ETTh1
+data_path_name=ETTm1.csv
+model_id_name=ETTm1
+data_name=ETTm1
 enc_in=7
 seq_len=96
 
 quant_range=3
-dim=8
-multiple_of=256
-heads=1
+dim=16
+multiple_of=64
+heads=2
 layers=1
-batch_size=256
-learning_rate=0.001
+batch_size=32
+learning_rate=0.01
 dropout=0.1
 monotonicity=1
-patching_threshold=0.25
-patching_threshold_add=0.15
-max_patch_length=8
-train_epochs=50
-patience=20
+patching_threshold=0.2
+patching_threshold_add=0.01
+max_patch_length=24
+train_epochs=10
+patience=10
 
 
-for random_seed in 2025 2026 2027 2028 2029
+for random_seed in 2025 
 do
-    for pred_len in 720
+    for pred_len in 336
     do
         python -u run_longExp.py \
         --random_seed $random_seed \
@@ -71,7 +71,7 @@ do
         --train_epochs $train_epochs \
         --patience $patience \
         --lradj 'TST'\
-        --pct_start 0.4\
+        --pct_start 0.3\
         --batch_size $batch_size \
         --patching_batch_size $((batch_size * enc_in)) \
         --learning_rate $learning_rate \

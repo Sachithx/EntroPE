@@ -17,23 +17,23 @@ seq_len=96
 
 quant_range=3
 dim=16
-multiple_of=64
-heads=2
+multiple_of=32
+heads=8
 layers=1
-batch_size=32
+batch_size=128
 learning_rate=0.01
-dropout=0.1
+dropout=0.2
 monotonicity=1
-patching_threshold=0.2
+patching_threshold=0.5
 patching_threshold_add=0.01
-max_patch_length=24
-train_epochs=10
+max_patch_length=8
+train_epochs=30
 patience=10
 
 
-for random_seed in 2025 2024 2023 2022 2021
+for random_seed in 2025 
 do
-    for pred_len in 96 192 336 720
+    for pred_len in 192
     do
         python -u run_longExp.py \
         --random_seed $random_seed \

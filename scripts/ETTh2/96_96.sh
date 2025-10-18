@@ -15,23 +15,23 @@ data_name=ETTh2
 enc_in=7
 seq_len=96
 
-quant_range=3
-dim=8
-multiple_of=256
-heads=1
+quant_range=1
+dim=32
+multiple_of=128
+heads=2
 layers=2
-batch_size=256
-learning_rate=0.001
+batch_size=420
+learning_rate=0.1
 dropout=0.1
 monotonicity=1
-patching_threshold=0.25
+patching_threshold=0.3
 patching_threshold_add=0.15
-max_patch_length=8
-train_epochs=50
+max_patch_length=24
+train_epochs=60
 patience=20
 
 
-for random_seed in 2025 2024 2023 2022 2021
+for random_seed in 2025 2030 2035 2040 2045
 do
     for pred_len in 96  
     do
@@ -71,7 +71,7 @@ do
         --train_epochs $train_epochs \
         --patience $patience \
         --lradj 'TST'\
-        --pct_start 0.3\
+        --pct_start 0.4\
         --batch_size $batch_size \
         --patching_batch_size $((batch_size * enc_in)) \
         --learning_rate $learning_rate \
