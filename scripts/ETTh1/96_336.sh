@@ -15,7 +15,7 @@ data_name=ETTh1
 enc_in=7
 seq_len=96
 
-quant_range=4
+quant_range=3
 dim=8
 multiple_of=256
 heads=2
