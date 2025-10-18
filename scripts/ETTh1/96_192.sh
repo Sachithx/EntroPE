@@ -31,7 +31,7 @@ train_epochs=100
 patience=20
 
 
-for random_seed in 2025 
+for random_seed in 2025 2026 2027 2028 2029
 do
     for pred_len in 192
     do

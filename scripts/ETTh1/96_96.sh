@@ -20,13 +20,13 @@ dim=8
 multiple_of=256
 heads=1
 layers=1
-batch_size=128
+batch_size=256
 learning_rate=0.001
-dropout=0.01
+dropout=0.1
 monotonicity=1
 patching_threshold=0.25
 patching_threshold_add=0.15
-max_patch_length=12
+max_patch_length=8
 train_epochs=50
 patience=20
 
@@ -71,7 +71,7 @@ do
         --train_epochs $train_epochs \
         --patience $patience \
         --lradj 'TST'\
-        --pct_start 0.4\
+        --pct_start 0.5\
         --batch_size $batch_size \
         --patching_batch_size $((batch_size * enc_in)) \
         --learning_rate $learning_rate \

@@ -33,7 +33,7 @@ patience=10
 
 for random_seed in 2025 2024 2023 2022 2021
 do
-    for pred_len in 96 192 336 720
+    for pred_len in 336  
     do
         python -u run_longExp.py \
         --random_seed $random_seed \
