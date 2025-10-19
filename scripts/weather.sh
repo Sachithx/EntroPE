@@ -29,16 +29,13 @@ echo "Using $NUM_GPUS GPU(s)"
 # Format: pred_len:quant_range:dim:multiple_of:heads:layers:batch_size:lr:dropout:patch_size:max_patch:patching_threshold:patching_threshold_add:pct_start:epochs:patience:cross_attn_k:attn_window:monotonicity
 configs=(
     # pred_len 96 - 3 layers, high threshold, no monotonicity
-    # "96:3:16:64:2:3:64:0.01:0.1:24:24:3.6:0.1:0.3:20:10:1:96:0"
-    "96:3:8:32:2:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
+    "96:3:16:64:2:3:64:0.01:0.1:24:24:3.6:0.1:0.3:20:10:1:96:0"
     
     # pred_len 192 - larger model, 2 layers, low threshold
-    # "192:3:16:64:4:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
-    "192:3:8:32:2:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
+    "192:3:16:64:4:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
     
     # pred_len 336 - same as 192 but larger batch
-    # "336:3:16:64:4:2:512:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
-    "336:3:8:32:2:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
+    "336:3:16:64:4:2:512:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
     
     # pred_len 720 - smaller model, 2 layers
     "720:3:8:32:2:2:128:0.01:0.2:8:8:0.15:0.05:0.4:25:20:1:96:1"
