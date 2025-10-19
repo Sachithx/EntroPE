@@ -304,6 +304,7 @@ class TrainingLogger:
         
         # Log to WandB
         if self.enable_wandb:
+            import wandb
             wandb.log(wandb_log)
         
         # Save to file

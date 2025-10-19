@@ -588,4 +588,3 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
         self.local_encoder.init_weights()
         self.global_transformer.init_weights()
         self.local_decoder.init_weights()
-    
