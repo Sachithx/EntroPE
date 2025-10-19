@@ -113,4 +113,3 @@ done
 
 wait
 echo "All ETTh2 experiments completed!"
-
