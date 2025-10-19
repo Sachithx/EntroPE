@@ -105,7 +105,7 @@ class LocalModelBase(nn.Module):
         )
 
         self.patch_embedding_projection = None #self._create_patch_projection(args)
-        print(f"Patch embedding projection: {self.patch_embedding_projection}")
+        # print(f"Patch embedding projection: {self.patch_embedding_projection}")
 
     def _should_create_patch_projection(self, args: LocalModelArgs):
         dimension_mismatch = (
@@ -262,15 +262,15 @@ class LocalEncoder(LocalModelBase):
 
         bs, seqlen = tokens.shape
 
-        if mask is None:
-            mask = create_causal_mask(
-                seqlen,
-                self.attn_impl,
-                self.attn_bias_type,
-                sliding_window=self.sliding_window,
-                tokens=tokens,
-                eos_id=self.eos_id,
-            )
+        # if mask is None:
+        #     mask = create_causal_mask(
+        #         seqlen,
+        #         self.attn_impl,
+        #         self.attn_bias_type,
+        #         sliding_window=self.sliding_window,
+        #         tokens=tokens,
+        #         eos_id=self.eos_id,
+        #     )
 
         # ----------------------------------------------
         #           Token Embedding 
@@ -284,10 +284,10 @@ class LocalEncoder(LocalModelBase):
             seq_len = h.size(1)
             device = h.device
 
-            pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
-            pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
+            # pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
+            # pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
 
-            h = h + pos_emb
+            # h = h + pos_emb
 
             freqs_cis = None
             h = h + self.pos_embeddings
@@ -373,15 +373,15 @@ class LocalDecoder(LocalModelBase):
         bs, seqlen = tokens.shape
         assert embeds is not None, "Embeddings must be provided"
 
-        if mask is None:
-            mask = create_causal_mask(
-                seqlen,
-                self.attn_impl,
-                self.attn_bias_type,
-                sliding_window=self.sliding_window,
-                tokens=tokens,
-                eos_id=self.eos_id,
-            )
+        # if mask is None:
+        #     mask = create_causal_mask(
+        #         seqlen,
+        #         self.attn_impl,
+        #         self.attn_bias_type,
+        #         sliding_window=self.sliding_window,
+        #         tokens=tokens,
+        #         eos_id=self.eos_id,
+        #     )
 
         h = embeds
 

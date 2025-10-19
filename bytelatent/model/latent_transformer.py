@@ -184,7 +184,7 @@ class GlobalTransformer(BaseTransformer):
                 bias=False,
             )
         # self.pos_embeddings = nn.Embedding(self.max_seqlen, args.dim)
-        print(f"[Global] Token embedding projection: {self.token_embedding_projection}")
+        # print(f"[Global] Token embedding projection: {self.token_embedding_projection}")
 
     def forward(
         self,
