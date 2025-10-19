@@ -96,7 +96,7 @@ class LocalModelBase(nn.Module):
                 max_seqlen=args.max_seqlen,
                 rope_use_fp32_in_outer_product=args.rope_use_fp32_in_outer_product,
             )
-            self.pos_embeddings = None
+            # self.pos_embeddings = None
 
         self.token_embedding_projection = (
             nn.Linear(args.dim_token_emb, args.dim, bias=False)
@@ -105,7 +105,7 @@ class LocalModelBase(nn.Module):
         )
 
         self.patch_embedding_projection = None #self._create_patch_projection(args)
-        # print(f"Patch embedding projection: {self.patch_embedding_projection}")
+        print(f"Patch embedding projection: {self.patch_embedding_projection}")
 
     def _should_create_patch_projection(self, args: LocalModelArgs):
         dimension_mismatch = (
@@ -239,13 +239,6 @@ class LocalEncoder(LocalModelBase):
                 )
 
     def apply_embedding(self, tokens, embeds):
-        # if embeds is not None:
-        #     assert (
-        #         self.expects_hash_embeddings
-        #     ), "Not expecting embeddings to be passed."
-
-        #     return embeds
-        # else:
         return self.tok_embeddings(tokens)
 
     def forward(
@@ -262,15 +255,15 @@ class LocalEncoder(LocalModelBase):
 
         bs, seqlen = tokens.shape
 
-        # if mask is None:
-        #     mask = create_causal_mask(
-        #         seqlen,
-        #         self.attn_impl,
-        #         self.attn_bias_type,
-        #         sliding_window=self.sliding_window,
-        #         tokens=tokens,
-        #         eos_id=self.eos_id,
-        #     )
+        if mask is None:
+            mask = create_causal_mask(
+                seqlen,
+                self.attn_impl,
+                self.attn_bias_type,
+                sliding_window=self.sliding_window,
+                tokens=tokens,
+                eos_id=self.eos_id,
+            )
 
         # ----------------------------------------------
         #           Token Embedding 
@@ -281,16 +274,16 @@ class LocalEncoder(LocalModelBase):
             freqs_cis = self.rope(seqlen=seqlen)  
         else: 
             # Suppose h: [bs, seq_len, dim]
-            # seq_len = h.size(1)
+            seq_len = h.size(1)
             device = h.device
 
-            # pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
-            # pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
+            pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
+            pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
 
-            # h = h + pos_emb
+            h = h + pos_emb
 
-            # freqs_cis = None
-            # h = h + self.pos_embeddings
+            freqs_cis = None
+            h = h + self.pos_embeddings
 
         h = F.dropout(h, p=self.dropout, training=self.training)
 
@@ -360,7 +353,6 @@ class LocalDecoder(LocalModelBase):
                 )
 
 
-
     def forward(
         self,
         tokens: torch.Tensor,
@@ -373,41 +365,20 @@ class LocalDecoder(LocalModelBase):
         bs, seqlen = tokens.shape
         assert embeds is not None, "Embeddings must be provided"
 
-        # if mask is None:
-        #     mask = create_causal_mask(
-        #         seqlen,
-        #         self.attn_impl,
-        #         self.attn_bias_type,
-        #         sliding_window=self.sliding_window,
-        #         tokens=tokens,
-        #         eos_id=self.eos_id,
-        #     )
+        if mask is None:
+            mask = create_causal_mask(
+                seqlen,
+                self.attn_impl,
+                self.attn_bias_type,
+                sliding_window=self.sliding_window,
+                tokens=tokens,
+                eos_id=self.eos_id,
+            )
 
         h = embeds
 
-        # if self.patch_embedding_projection is not None:
-        #     # print(f"Patch embeddings shape before projection: {patch_embeds.shape if patch_embeds is not None else 'None'}")
-        #     assert patch_embeds is not None, "Patch embeddings must be passed."
-        #     patch_embeds = self.patch_embedding_projection(patch_embeds)
-        #     if self.cross_attn_k is not None:
-        #         patch_embeds = patch_embeds.reshape(
-        #             bs, patch_embeds.shape[1] * self.cross_attn_k, self.dim
-        #         )
-        # if patch_embeds is not None and not self.cross_attn_decoder:
-        #     h = h + patch_embeds
-
         if self.use_rope:
             freqs_cis = self.rope(seqlen=seqlen)  
-        else: 
-            # Suppose h: [bs, seq_len, dim]
-            seq_len = h.size(1)
-        
-        device = h.device
-
-        # pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
-        # pos_emb = self.pos_embeddings(pos_ids)                       # [1, seq_len, dim]
-
-        # h = h + pos_emb
 
 
         h = F.dropout(h, p=self.dropout, training=self.training)
@@ -427,6 +398,6 @@ class LocalDecoder(LocalModelBase):
 
         h_preds = self.norm(h)
         h_preds = F.dropout(h_preds, p=self.dropout, training=self.training)
-        # h_preds = self.output(h_preds)
+
         h_preds = h_preds.float()
         return h_preds, cache
