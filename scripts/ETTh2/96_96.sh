@@ -16,17 +16,17 @@ enc_in=7
 seq_len=96
 
 quant_range=1
-dim=32
-multiple_of=128
+dim=8
+multiple_of=256
 heads=2
 layers=2
 batch_size=420
 learning_rate=0.1
 dropout=0.1
 monotonicity=1
-patching_threshold=0.3
+patching_threshold=0.25
 patching_threshold_add=0.15
-max_patch_length=24
+max_patch_length=48
 train_epochs=60
 patience=20
 
