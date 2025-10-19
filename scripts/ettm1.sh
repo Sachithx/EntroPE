@@ -13,7 +13,7 @@ enc_in=7
 seq_len=96
 
 # Random seeds
-random_seeds="2025 2026 2027 2028 2029"
+random_seeds="1025 2025 4025 5025 6025"
 
 # Detect GPUs
 if command -v nvidia-smi &> /dev/null; then
