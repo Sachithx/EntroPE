@@ -184,7 +184,7 @@ class GlobalTransformer(BaseTransformer):
                 bias=False,
             )
         # self.pos_embeddings = nn.Embedding(self.max_seqlen, args.dim)
-        # print(f"[Global] Token embedding projection: {self.token_embedding_projection}")
+        print(f"[Global] Token embedding projection: {self.token_embedding_projection}")
 
     def forward(
         self,
@@ -206,17 +206,17 @@ class GlobalTransformer(BaseTransformer):
 
         # h = h + pos_emb
 
-        mask = (
-            mask
-            if mask is not None
-            else create_causal_mask(
-                seqlen,
-                self.attn_impl,
-                self.attn_bias_type,
-                tokens=tokens,
-                eos_id=self.eos_id,
-            )
-        )
+        # mask = (
+        #     mask
+        #     if mask is not None
+        #     else create_causal_mask(
+        #         seqlen,
+        #         self.attn_impl,
+        #         self.attn_bias_type,
+        #         tokens=tokens,
+        #         eos_id=self.eos_id,
+        #     )
+        # )
 
         if self.token_embedding_projection is not None and h.shape[-1] != self.dim:
             h = self.token_embedding_projection(h)
