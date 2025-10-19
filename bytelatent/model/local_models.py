@@ -96,8 +96,6 @@ class LocalModelBase(nn.Module):
                 max_seqlen=args.max_seqlen,
                 rope_use_fp32_in_outer_product=args.rope_use_fp32_in_outer_product,
             )
-            # self.pos_embeddings = None
-
         self.token_embedding_projection = (
             nn.Linear(args.dim_token_emb, args.dim, bias=False)
             if hasattr(args, "dim_token_emb") and args.dim_token_emb != self.dim
