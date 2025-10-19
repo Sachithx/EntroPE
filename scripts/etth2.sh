@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Create log directories
-mkdir -p ./logs/LongForecasting/$model_id_name
+mkdir -p ./logs/LongForecasting
 
 # Common parameters
 model_name=EntroPE
@@ -12,40 +11,58 @@ model_id_name=ETTh2
 data_name=ETTh2
 enc_in=7
 seq_len=96
-quant_range=1
-multiple_of=128
-heads=2
-monotonicity=1
-patching_threshold=0.3
-patching_threshold_add=0.15
-max_patch_length=24
 
-# Random seeds for all experiments
-random_seeds="2025 2024 2023 2022 2021"
+# Random seeds
+random_seeds="1025 2025 4025 5025 6025"
 
-# Experiment configurations: gpu_id:pred_len:dim:layers:batch_size:lr:dropout:epochs:patience:pct_start
+# Detect GPUs
+if command -v nvidia-smi &> /dev/null; then
+    NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
+    if [ "$NUM_GPUS" -eq 0 ]; then
+        NUM_GPUS=1
+    fi
+else
+    NUM_GPUS=1
+fi
+echo "Using $NUM_GPUS GPU(s)"
+
+# Format: pred_len:quant_range:dim:multiple_of:heads:layers:batch_size:lr:dropout:max_patch:patching_threshold:patching_threshold_add:pct_start:epochs:patience:cross_attn_k:attn_window
 configs=(
-    "0:96:32:2:420:0.1:0.1:60:20:0.4"
-    "1:192:8:1:420:0.0001:0.2:50:40:0.3"
-    "2:336:8:1:512:0.0001:0.3:50:40:0.3"
-    "3:720:8:1:512:0.0001:0.3:50:40:0.3"
+    # pred_len 96 - largest model, 2 layers, high learning rate
+    "96:1:32:128:2:2:420:0.1:0.1:24:0.3:0.15:0.4:60:20:1:96"
+    
+    # pred_len 192 - small model, very low learning rate
+    "192:1:8:128:2:1:420:0.0001:0.2:24:0.3:0.15:0.3:50:40:1:96"
+    
+    # pred_len 336 - small model, higher dropout, larger batch
+    "336:1:8:128:2:1:512:0.0001:0.3:24:0.3:0.15:0.3:50:40:1:96"
+    
+    # pred_len 720 - same as 336
+    "720:1:8:128:2:1:512:0.0001:0.3:24:0.3:0.15:0.3:50:40:1:96"
 )
 
-# Run experiments in parallel
+# Run experiments
+gpu_idx=0
 for config in "${configs[@]}"; do
-    IFS=':' read -r gpu_id pred_len dim layers batch_size learning_rate dropout train_epochs patience pct_start <<< "$config"
+    IFS=':' read -r pred_len quant_range dim multiple_of heads layers batch_size learning_rate dropout max_patch_length patching_threshold patching_threshold_add pct_start train_epochs patience cross_attn_k attn_window <<< "$config"
     
-    echo "Starting experiment on GPU $gpu_id: pred_len=$pred_len"
+    gpu_id=$((gpu_idx % NUM_GPUS))
+    
+    echo "Starting experiment on GPU $gpu_id: pred_len=$pred_len, dim=$dim, heads=$heads, layers=$layers, batch_size=$batch_size, lr=$learning_rate"
     
     (
         for random_seed in $random_seeds; do
+            log_file="logs/LongForecasting/${model_name}_${model_id_name}_${seq_len}_${pred_len}_seed${random_seed}.log"
+            
+            echo "Running seed $random_seed for pred_len=$pred_len on GPU $gpu_id"
+            
             CUDA_VISIBLE_DEVICES=$gpu_id python -u run_longExp.py \
                 --random_seed $random_seed \
                 --is_training 1 \
                 --root_path $root_path_name \
                 --entropy_model_checkpoint_dir $entropy_model_checkpoint_dir \
                 --data_path $data_path_name \
-                --model_id $model_id_name'_'$seq_len'_'$pred_len \
+                --model_id ${model_id_name}_${seq_len}_${pred_len} \
                 --model_id_name $model_id_name \
                 --model $model_name \
                 --data $data_name \
@@ -61,31 +78,38 @@ for config in "${configs[@]}"; do
                 --dim_global $dim \
                 --dim_local_encoder $dim \
                 --dim_local_decoder $dim \
+                --cross_attn_k $cross_attn_k \
                 --n_heads_local_encoder $heads \
                 --n_heads_local_decoder $heads \
                 --n_heads_global $heads \
                 --cross_attn_nheads $heads \
+                --cross_attn_window_encoder $attn_window \
+                --cross_attn_window_decoder $attn_window \
+                --local_attention_window_len $attn_window \
                 --dropout $dropout \
                 --multiple_of $multiple_of \
                 --max_patch_length $max_patch_length \
                 --patching_threshold $patching_threshold \
                 --patching_threshold_add $patching_threshold_add \
-                --monotonicity $monotonicity \
+                --monotonicity 1 \
                 --des 'Exp' \
                 --train_epochs $train_epochs \
                 --patience $patience \
                 --lradj 'TST' \
                 --pct_start $pct_start \
+                --itr 1 \
                 --batch_size $batch_size \
                 --patching_batch_size $((batch_size * enc_in)) \
                 --learning_rate $learning_rate \
-                >logs/LongForecasting/$model_name'_'$model_id_name'_'$seq_len'_'$pred_len'_seed'$random_seed.log
+                >$log_file 2>&1
+            
+            echo "Completed seed $random_seed for pred_len=$pred_len on GPU $gpu_id"
         done
-        echo "Completed experiment on GPU $gpu_id: pred_len=$pred_len"
+        echo "Finished all seeds for pred_len=$pred_len on GPU $gpu_id"
     ) &
+    
+    gpu_idx=$((gpu_idx + 1))
 done
 
-# Wait for all background processes to complete
 wait
-
-echo "All experiments completed!"
+echo "All ETTh2 experiments completed!"
