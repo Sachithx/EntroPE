@@ -469,7 +469,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
             )
 
         # Initialize weights automatically
-        self.init_weights()
+        # self.init_weights()
 
     def get_output_seq_len(self):
         """Return maximum sequence length."""
@@ -510,6 +510,7 @@ class ByteLatentTransformer(nn.Module, SequenceModelWithOutput):
                 include_next_token=True,
                 threshold=self.patcher.threshold,
             )
+            # print(patch_lengths[4])
         else:
             if nb_boe > 0:
                 patch_lengths[:, 0] += nb_boe
