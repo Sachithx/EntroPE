@@ -161,7 +161,6 @@ If you found this work useful for you, please consider citing it.
 
 This work builds upon and is inspired by several key contributions in the field:
 
-### Foundational Work
 - **PatchTST**: Our approach is built on the foundation of PatchTST and other patch-based time series transformers, which demonstrated the effectiveness of patch-based architectures for time series forecasting.
   - Repository: https://github.com/yuqinie98/PatchTST
 
