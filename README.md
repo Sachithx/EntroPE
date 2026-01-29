@@ -5,7 +5,7 @@
 # Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting
 
 This repository contains the official implementation of the paper:
-> **EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting**  
+> **Entropy-Guided Dynamic Patch Segmentation for Time Series Transformers**  
 > *Under review.*
 
 ---
@@ -48,11 +48,10 @@ pip install -r requirements.txt
 ## Experiments
 
 ### Datasets
-We evaluate on 7 benchmark datasets:
+We evaluate on 6 benchmark datasets:
 - **ETT family**: ETTh1, ETTh2, ETTm1, ETTm2 (Energy)
 - **Weather**: Meteorological data 
 - **Electricity**: Power consumption
-- **Exchange Rate**: Currency exchange rates
 
 ### Quick Start
 ```bash
@@ -69,34 +68,11 @@ EntroPE achieves significant improvements over existing methods:
 
 ---
 
-## Configuration
-
-### Model Parameters
-```yaml
-# Core model settings
-learning_rate: 0.001
-batch_size: 64
-train_epochs: 20
-patience: 7
-dropout: 0.1
-
-# Architecture
-dim: 8
-heads: 2
-layers: 1
-multiple_of: 64
-
-# Dynamic patching
-patching_threshold: 0.2
-patching_threshold_add: 0.01
-max_patch_length: 24
-monotonicity: 1
-```
 
 ### Threshold Selection
 - **threshold_global**: Controls patch granularity (higher = fewer patches)
 - **threshold_relative**: Controls sensitivity to entropy changes
-- Robust across range [0.15, 0.55] for most datasets
+- Robust across range [75%, 95%] for most datasets
 
 ---
 
@@ -119,26 +95,7 @@ monotonicity: 1
 
 ---
 
-## Reproducibility
-
-All results can be reproduced using:
-- Fixed random seeds (5 different seeds reported)
-- Complete hyperparameter configurations provided
-- Environment specifications included
-
-**Tested Platforms** (single-GPU):
-- NVIDIA RTX 4090
-- NVIDIA RTX A5000  
-- NVIDIA GeForce RTX 4090 D
-- NVIDIA RTX 6000 Ada-16Q
-
 **Evaluation Metrics**: MSE, MAE, MACs (Multiply-Accumulate Operations)
-
----
-
-## License
-
-This project is licensed under the Apache License - see the LICENSE file for details.
 
 ---
 
@@ -154,6 +111,12 @@ If you found this work useful for you, please consider citing it.
   year={2025}
 }
 ```
+
+---
+
+## License
+
+This project is licensed under the Apache License - see the LICENSE file for details.
 
 ---
 
