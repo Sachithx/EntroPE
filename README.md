@@ -142,41 +142,33 @@ This project is licensed under the Apache License - see the LICENSE file for det
 
 ---
 
+## Citing
+
+If you found this work useful for you, please consider citing it.
+
+```bibtex
+@article{abeywickrama2025entrope,
+  title={EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting},
+  author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
+  journal={arXiv preprint arXiv:2509.26157},
+  year={2025}
+}
+```
+
+---
+
 ## Acknowledgments
 
 This work builds upon and is inspired by several key contributions in the field:
 
-### Foundational Work
 - **PatchTST**: Our approach is built on the foundation of PatchTST and other patch-based time series transformers, which demonstrated the effectiveness of patch-based architectures for time series forecasting.
-
-```bibtex
-@inproceedings{Yuqietal-2023-PatchTST,
-  title     = {A Time Series is Worth 64 Words: Long-term Forecasting with Transformers},
-  author    = {Nie, Yuqi and H. Nguyen, Nam and Sinthong, Phanwadee and Kalagnanam, Jayant},
-  booktitle = {International Conference on Learning Representations},
-  year      = {2023}
-}
-```
-
-### Dynamic Patching Inspiration
-- **Byte Latent Transformer**: Our dynamic patching approach draws inspiration from advances in NLP, particularly the Byte Latent Transformer's innovative approach to variable-length tokenization.
-
-```bibtex
-@article{meta_blt,
-  title     = {Byte Latent Transformer: Patches Scale Better Than Tokens},
-  author    = {Pagnoni, Artidoro and Pasunuru, Ramakanth and Rodriguez, Pedro and Nguyen, John and Muller, Benjamin and Li, Margaret and Zhou, Chunting and Yu, Lili and Weston, Jason E and Zettlemoyer, Luke and Ghosh, Gargi and Lewis, Mike and Holtzman, Ari and Iyer, Srini},
-  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
-  year      = {2025},
-  address   = {Vienna, Austria},
-  publisher = {Association for Computational Linguistics}
-}
-```
-
-### Evaluation and Implementation
-- **TimeKAN Benchmarking Suite**: Our evaluation framework is adapted from the TimeKAN benchmarking suite, providing robust and standardized performance metrics.
+  - Repository: https://github.com/yuqinie98/PatchTST
 
 - **nanoGPT**: The Entropy Model GPT-2 architecture implementation partially incorporates code from Andrej Karpathy's nanoGPT implementation. We gratefully acknowledge this clean and educational codebase.
   - Repository: https://github.com/karpathy/nanoGPT
+
+- **Byte Latent Transformer**: Our dynamic patching approach draws inspiration from advances in NLP, particularly the Byte Latent Transformer's innovative approach to variable-length tokenization.
+  - Repository: https://github.com/facebookresearch/blt
 
 ---
 
