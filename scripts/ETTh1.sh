@@ -20,7 +20,7 @@ seed=42
 # =========================
 # Core architecture params
 # =========================
-d_model=8 
+d_model=8
 n_heads=2
 e_layers=3
 d_ff=256
@@ -28,8 +28,8 @@ d_ff=256
 # =========================
 # Patching params
 # =========================
-max_patch_length=96
-patching_threshold=0.25
+max_patch_length=32
+patching_threshold=0.95
 monotonicity=0
 
 # =========================
@@ -37,7 +37,7 @@ monotonicity=0
 # =========================
 dropout=0.1
 learning_rate=0.01
-train_epochs=20
+train_epochs=10
 itr=1
 des=Exp
 
