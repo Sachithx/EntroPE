@@ -1,18 +1,9 @@
 # Core ML/DL dependencies
-torch>=2.0.0
-numpy>=1.21.0
-pandas>=1.3.0
-scipy>=1.7.0
-scikit-learn>=1.0.0
-
-# Time series specific
-# chronos-forecasting>=1.0.0
-# gluonts>=0.12.0
-
-# Transformers and NLP
-transformers>=4.20.0
-tokenizers>=0.13.0
-huggingface-hub>=0.15.0
+torch
+numpy
+pandas
+scipy
+scikit-learn
 
 # Training utilities
 accelerate>=0.20.0
@@ -21,17 +12,5 @@ evaluate>=0.4.0
 
 # Visualization and analysis
 matplotlib>=3.5.0
-seaborn>=0.11.0
-plotly>=5.0.0
 ptflops>=0.6.0
-
-# Configuration and utilities
-omegaconf>=2.2.0
-pyyaml>=6.0
-tqdm>=4.60.0
-rich>=10.0.0
-
-# Data processing
-pyarrow>=10.0.0
-joblib>=1.1.0
 
