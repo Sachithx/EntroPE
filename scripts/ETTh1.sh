@@ -28,9 +28,9 @@ d_ff=256
 # =========================
 # Patching params
 # =========================
-max_patch_length=32
-patching_threshold=0.50
-monotonicity=1
+max_patch_length=96
+patching_threshold=0.25
+monotonicity=0
 
 # =========================
 # Optimization params
@@ -49,7 +49,7 @@ is_training=1
 # =========================
 # Experiment loop
 # =========================
-for pred_len in 720; do
+for pred_len in 96; do
     
     model_id="${model_id_name}_${seq_len}preds${pred_len}"
     
