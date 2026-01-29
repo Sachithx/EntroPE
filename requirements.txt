@@ -6,8 +6,8 @@ scipy>=1.7.0
 scikit-learn>=1.0.0
 
 # Time series specific
-chronos-forecasting>=1.0.0
-gluonts>=0.12.0
+# chronos-forecasting>=1.0.0
+# gluonts>=0.12.0
 
 # Transformers and NLP
 transformers>=4.20.0
@@ -35,6 +35,3 @@ rich>=10.0.0
 pyarrow>=10.0.0
 joblib>=1.1.0
 
-# Optional: Monitoring and logging
-wandb>=0.15.0
-tensorboard>=2.8.0

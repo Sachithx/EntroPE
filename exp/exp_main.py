@@ -14,15 +14,15 @@ import os
 import time
 import warnings
 import matplotlib.pyplot as plt
-import wandb
+# import wandb
 
 warnings.filterwarnings('ignore')
 
 
 class Exp_Main(Exp_Basic):
     def __init__(self, args):
-        self.wandb_config = self._build_wandb_config(args)
-        self.wandb_initialized = False
+        # self.wandb_config = self._build_wandb_config(args)
+        # self.wandb_initialized = False
         super(Exp_Main, self).__init__(args)
 
     def _build_wandb_config(self, args):
@@ -102,8 +102,8 @@ class Exp_Main(Exp_Basic):
             'trainable_parameters': trainable_params,
         }
         
-        if self.wandb_initialized:
-            wandb.config.update(self.model_info)
+        # if self.wandb_initialized:
+        #     wandb.config.update(self.model_info)
         
         return model
 
@@ -172,18 +172,18 @@ class Exp_Main(Exp_Basic):
 
     def train(self, setting):
         # Initialize wandb
-        wandb.init(
-            project=f"time-series-forecasting-{self.args.data_path}",
-            name=setting,
-            config=self.wandb_config,
-            reinit=True
-        )
-        self.wandb_initialized = True
+        # wandb.init(
+        #     project=f"time-series-forecasting-{self.args.data_path}",
+        #     name=setting,
+        #     config=self.wandb_config,
+        #     reinit=True
+        # )
+        # self.wandb_initialized = True
         
-        if hasattr(self, 'model_info'):
-            wandb.config.update(self.model_info)
+        # if hasattr(self, 'model_info'):
+        #     wandb.config.update(self.model_info)
         
-        wandb.watch(self.model, log='all', log_freq=100)
+        # wandb.watch(self.model, log='all', log_freq=100)
         
         # Get data loaders
         train_data, train_loader = self._get_data(flag='train')
@@ -220,7 +220,7 @@ class Exp_Main(Exp_Basic):
         }
         if hasattr(self.args, 'patching_batch_size'):
             dataset_info['patching_batch_size'] = self.args.patching_batch_size
-        wandb.log(dataset_info)
+        # wandb.log(dataset_info)
 
         # Training loop
         time_now = time.time()
@@ -250,7 +250,7 @@ class Exp_Main(Exp_Basic):
                                 as_strings=True, 
                                 print_per_layer_stat=False
                             )
-                            print(f'Computational complexity: {macs}')
+                            # print(f'Computational complexity: {macs}')
                             print(f'Number of parameters: {params}')
                     except:
                         pass
@@ -283,12 +283,12 @@ class Exp_Main(Exp_Basic):
                     left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
                     print(f'\tspeed: {speed:.4f}s/iter; left time: {left_time:.4f}s')
                     
-                    wandb.log({
-                        'batch_loss': loss.item(),
-                        'learning_rate': model_optim.param_groups[0]['lr'],
-                        'training_speed_s_per_iter': speed,
-                        'estimated_time_left_s': left_time,
-                    }, step=epoch * train_steps + i)
+                    # wandb.log({
+                    #     'batch_loss': loss.item(),
+                    #     'learning_rate': model_optim.param_groups[0]['lr'],
+                    #     'training_speed_s_per_iter': speed,
+                    #     'estimated_time_left_s': left_time,
+                    # }, step=epoch * train_steps + i)
                     
                     iter_count = 0
                     time_now = time.time()
@@ -317,21 +317,21 @@ class Exp_Main(Exp_Basic):
             print(f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} "
                   f"Vali Loss: {vali_loss:.7f} Test Loss: {test_loss:.7f}")
             
-            wandb.log({
-                'epoch_train_loss': train_loss,
-                'epoch_val_loss': vali_loss,
-                'epoch_test_loss': test_loss,
-                'epoch_duration': epoch_duration,
-                'epoch': epoch + 1,
-            })
+            # wandb.log({
+            #     'epoch_train_loss': train_loss,
+            #     'epoch_val_loss': vali_loss,
+            #     'epoch_test_loss': test_loss,
+            #     'epoch_duration': epoch_duration,
+            #     'epoch': epoch + 1,
+            # })
             
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
-                wandb.log({
-                    'early_stopping_epoch': epoch + 1,
-                    'best_val_loss': early_stopping.val_loss_min,
-                })
+                # wandb.log({
+                #     'early_stopping_epoch': epoch + 1,
+                #     'best_val_loss': early_stopping.val_loss_min,
+                # })
                 break
 
             if self.args.lradj != 'TST':
@@ -339,22 +339,22 @@ class Exp_Main(Exp_Basic):
 
         best_model_path = os.path.join(path, 'checkpoint.pth')
         self.model.load_state_dict(torch.load(best_model_path))
-        wandb.save(best_model_path)
+        # wandb.save(best_model_path)
         
         return self.model
 
     def test(self, setting, test=0):
-        if not self.wandb_initialized:
-            wandb.init(
-                project=f"time-series-forecasting-{self.args.data}",
-                name=f"{setting}_test",
-                config=self.wandb_config,
-                reinit=True
-            )
-            self.wandb_initialized = True
+        # if not self.wandb_initialized:
+        #     # wandb.init(
+        #     #     project=f"time-series-forecasting-{self.args.data}",
+        #     #     name=f"{setting}_test",
+        #     #     config=self.wandb_config,
+        #     #     reinit=True
+        #     # )
+        #     # self.wandb_initialized = True
             
-            if hasattr(self, 'model_info'):
-                wandb.config.update(self.model_info)
+        #     if hasattr(self, 'model_info'):
+        #         wandb.config.update(self.model_info)
         
         test_data, test_loader = self._get_data(flag='test')
         
@@ -410,7 +410,7 @@ class Exp_Main(Exp_Basic):
                     ax.legend()
                     ax.set_title(f'Prediction vs Ground Truth - Batch {i}')
                     
-                    wandb.log({f'prediction_plot_batch_{i}': wandb.Image(fig)})
+                    # wandb.log({f'prediction_plot_batch_{i}': wandb.Image(fig)})
                     plt.close(fig)
                     
                     visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
@@ -438,7 +438,7 @@ class Exp_Main(Exp_Basic):
             'test_rse': rse,
             'test_correlation_mean': corr_mean,
         }
-        wandb.log(test_metrics)
+        # wandb.log(test_metrics)
         
         # Create visualization
         errors = preds - trues
@@ -458,7 +458,6 @@ class Exp_Main(Exp_Basic):
         ax2.set_title('Predicted vs Actual')
         
         plt.tight_layout()
-        wandb.log({"error_analysis": wandb.Image(fig)})
         plt.close(fig)
         
         # Save results
@@ -471,21 +470,9 @@ class Exp_Main(Exp_Basic):
 
         np.save(os.path.join(folder_path, 'pred.npy'), preds)
         
-        wandb.finish()
         return
 
     def predict(self, setting, load=False):
-        if not self.wandb_initialized:
-            wandb.init(
-                project=f"time-series-forecasting-{self.args.data}",
-                name=f"{setting}_prediction",
-                config=self.wandb_config,
-                reinit=True
-            )
-            self.wandb_initialized = True
-            
-            if hasattr(self, 'model_info'):
-                wandb.config.update(self.model_info)
         
         pred_data, pred_loader = self._get_data(flag='pred')
 
@@ -518,17 +505,10 @@ class Exp_Main(Exp_Basic):
 
         preds = np.concatenate(preds, axis=0)
 
-        # Log prediction statistics
-        wandb.log({
-            'prediction_mean': float(np.mean(preds)),
-            'prediction_std': float(np.std(preds)),
-            'num_predictions': len(preds),
-        })
-
         # Save results
         folder_path = './results/' + setting + '/'
         os.makedirs(folder_path, exist_ok=True)
         np.save(os.path.join(folder_path, 'real_prediction.npy'), preds)
         
-        wandb.finish()
+        # wandb.finish()
         return

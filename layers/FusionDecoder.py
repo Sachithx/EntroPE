@@ -1,5 +1,7 @@
 """
-FusionDecoder module for fusing global and local representations.
+FusionDecoder: Fuses global patch representations with local token representations.
+
+Decodes token-level features while incorporating global patch context via cross-attention.
 """
 
 from typing import List, Optional, Tuple, Union
@@ -8,49 +10,65 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from bytelatent.model.local_models import LocalModelBase, LocalModelArgs
-from bytelatent.model.latent_transformer import CrossAttention
-from bytelatent.model.utils import create_causal_mask
-
-RMSNorm = nn.RMSNorm
+from layers.Args import LocalModelBase, LocalModelArgs
+from layers.BaseTransformer import CrossAttention
 
 
 class FusionDecoder(LocalModelBase):
     """
-    Fusion decoder that combines local token representations with global patch embeddings.
-    
-    Uses cross-attention to inject global context into local representations,
-    enabling the model to leverage both local and global information.
+    Fusion Decoder with cross-attention over global patch embeddings.
+
+    Token embeddings are refined through transformer layers while attending to
+    patch-level latent representations for global context integration.
     """
-    
+
     def __init__(self, args: LocalModelArgs):
         super().__init__(args)
-        
-        # Configuration flags
+
+        # ----------------------------------
+        # Cross-Attention Configuration
+        # ----------------------------------
         self.cross_attn_decoder = args.cross_attn_decoder
         self.cross_attn_all_layers_decoder = args.cross_attn_all_layers_decoder
         self.cross_attn_init_by_pooling = args.cross_attn_init_by_pooling
         self.cross_attn_nheads = args.cross_attn_nheads
-        
-        # Output normalization
-        self.norm = RMSNorm(args.dim, eps=args.norm_eps)
-        
-        # Cross-attention layers
+
+        # ----------------------------------
+        # Output Normalization
+        # ----------------------------------
+        self.norm = nn.RMSNorm(args.dim, eps=args.norm_eps)
+
+        # ----------------------------------
+        # Cross-Attention Layers (if enabled)
+        # ----------------------------------
         if self.cross_attn_decoder:
-            self.cross_attn_layers = nn.ModuleList()
-            num_cross_attn_layers = args.n_layers if self.cross_attn_all_layers_decoder else 1
-            
-            for _ in range(num_cross_attn_layers):
-                self.cross_attn_layers.append(
-                    CrossAttention(
-                        dim=self.dim,
-                        head_dim=self.dim // self.cross_attn_nheads,
-                        n_heads=self.cross_attn_nheads,
-                        n_kv_heads=self.cross_attn_nheads,
-                        norm_eps=args.norm_eps,
-                    )
+            self._init_cross_attention_layers(args)
+
+    # ----------------------------------
+    # Cross-Attention Layer Builder
+    # ----------------------------------
+    def _init_cross_attention_layers(self, args: LocalModelArgs):
+        """Initialize cross-attention layers."""
+        self.cross_attn_layers = nn.ModuleList()
+
+        num_layers = (
+            args.n_layers if self.cross_attn_all_layers_decoder else 1
+        )
+
+        for _ in range(num_layers):
+            self.cross_attn_layers.append(
+                CrossAttention(
+                    dim=self.dim,
+                    head_dim=self.dim // self.cross_attn_nheads,
+                    n_heads=self.cross_attn_nheads,
+                    n_kv_heads=self.cross_attn_nheads,
+                    norm_eps=args.norm_eps,
                 )
-    
+            )
+
+    # ----------------------------------
+    # Forward Pass
+    # ----------------------------------
     def forward(
         self,
         tokens: torch.Tensor,
@@ -59,70 +77,72 @@ class FusionDecoder(LocalModelBase):
         mask: Optional[Union[torch.Tensor, str]] = None,
         cross_mask: Optional[torch.Tensor] = None,
         cache: Optional[List[Tuple[torch.Tensor, torch.Tensor, int]]] = None,
-    ) -> Tuple[torch.Tensor, Optional[List]]:
+    ):
         """
-        Forward pass through the fusion decoder.
-        
+        Forward pass for fusion decoding.
+
         Args:
-            tokens: Token IDs of shape [batch_size, seq_len]
-            embeds: Local token embeddings of shape [batch_size, seq_len, dim]
-            patch_embeds: Global patch embeddings for cross-attention
-            mask: Attention mask for self-attention
-            cross_mask: Attention mask for cross-attention
-            cache: KV cache for generation
-            
+            tokens: Token IDs (batch_size, seq_len) — used only for shape
+            embeds: Token embeddings from encoder (batch_size, seq_len, dim)
+            patch_embeds: Patch-level global embeddings (batch_size, num_patches, dim)
+            mask: Self-attention mask (default = causal)
+            cross_mask: Cross-attention mask (token → patch)
+            cache: Optional KV cache (inference)
+
         Returns:
-            Tuple of (output_predictions, cache)
+            (decoded_embeddings, cache)
         """
+
         bs, seqlen = tokens.shape
-        
-        # Embeddings are required
-        assert embeds is not None, "Embeddings must be provided to FusionDecoder"
-        
-        # Create causal mask if not provided
+        assert embeds is not None, "FusionDecoder requires token embeddings"
+
+        # Default attention mask
         if mask is None:
-            mask = create_causal_mask(
-                seqlen,
-                self.attn_impl,
-                self.attn_bias_type,
-                sliding_window=self.sliding_window,
-                tokens=tokens,
-                eos_id=self.eos_id,
-            )
-        
-        # Start with provided embeddings
+            mask = "causal"
+
         h = embeds
-        
-        # Add positional embeddings
-        device = h.device
-        pos_ids = torch.arange(seqlen, device=device).unsqueeze(0)  # [1, seq_len]
-        pos_emb = self.pos_embeddings(pos_ids)                      # [1, seq_len, dim]
-        h = h + pos_emb
-        
-        # Apply dropout
+
+        # ----------------------------------
+        # Rotary / Positional Encoding
+        # ----------------------------------
+        freqs_cis = self.rope(seqlen=seqlen) if self.use_rope else None
+
+        # ----------------------------------
+        # Input Dropout
+        # ----------------------------------
         h = F.dropout(h, p=self.dropout, training=self.training)
-        
-        # Process through layers with cross-attention
+
+        # ----------------------------------
+        # Transformer + Cross-Attention
+        # ----------------------------------
         for i, layer in enumerate(self.layers):
-            # Apply cross-attention at first layer or all layers based on config
+
+            # Apply cross-attention if enabled
             if self.cross_attn_decoder and (
-                i == 0 or self.cross_attn_all_layers_decoder
+                self.cross_attn_all_layers_decoder or i == 0
             ):
-                # Cross-attention: h attends to patch_embeds
-                cross_attn_layer_idx = i if self.cross_attn_all_layers_decoder else 0
-                h_cross = self.cross_attn_layers[cross_attn_layer_idx](
+                cross_layer_idx = i if self.cross_attn_all_layers_decoder else 0
+
+                h_cross = self.cross_attn_layers[cross_layer_idx](
                     x=h,
                     kv=patch_embeds,
                     mask=cross_mask,
                 )
+
                 h = h + h_cross
-            
-            # Self-attention within decoder
-            h = layer(h, mask=mask, freq_cis=None, attn_impl=self.attn_impl)
-        
-        # Final normalization
-        h_preds = self.norm(h)
-        h_preds = F.dropout(h_preds, p=self.dropout, training=self.training)
-        h_preds = h_preds.float()
-        
-        return h_preds, cache
+
+            # Apply transformer self-attention block
+            h = layer(
+                h,
+                mask=mask,
+                freq_cis=freqs_cis,
+                attn_impl=self.attn_impl,
+            )
+
+        # ----------------------------------
+        # Output Projection & Normalization
+        # ----------------------------------
+        h = self.norm(h)
+        h = F.dropout(h, p=self.dropout, training=self.training)
+
+        return h.float(), cache

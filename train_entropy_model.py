@@ -4,8 +4,9 @@ import torch
 from tqdm import tqdm
 import wandb
 from models.GPT2EntropyModel import GPTConfig, GPT
-from utils.train_utils import build_dataloader, build_tokenizer, get_lr
-
+from utils.train_utils import get_lr
+from layers.Tokenizer import build_tokenizer
+from data_provider.data_factory import data_provider
 
 # ============================================================================
 # CONFIGURATION SECTION
@@ -20,20 +21,28 @@ class TrainingConfig:
     dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16'
     
     # Model Architecture
-    n_layer = 2
-    n_head = 4
-    n_embd = 32
-    dropout = 0.01
+    n_layer = 3
+    n_head = 2
+    n_embd = 16
+    dropout = 0.1
     bias = False
     vocab_size = 256
     
     # Data Configuration
-    dataset_name = 'exchange'
+    dataset_name = 'ETTh2'
     features = 'M'
-    quant_range = 3
+    data="ETTh2"
+    embed="timeF"
+    freq = 'h'
+    root_path = './dataset/'
+    data_path = 'ETTh2.csv'
     batch_size = 128
     seq_len = 96
+    pred_len = 1
+    label_len = 95
     block_size = seq_len
+    target = 'OT'
+    num_workers = 4
     
     # Training Hyperparameters
     learning_rate = 1e-3
@@ -50,10 +59,10 @@ class TrainingConfig:
     decay_lr = True
     
     # Training Control
-    patience = 10  # Early stopping patience
+    patience = 5  # Early stopping patience
     save_every = 10
     seed = 42
-    compile = True
+    compile = False
     
     # Output
     output_dir = "output"
@@ -189,7 +198,6 @@ def setup_wandb(config):
         'data': {
             'dataset_name': config.dataset_name,
             'features': config.features,
-            'quant_range': config.quant_range,
             'batch_size': config.batch_size,
             'seq_len': config.seq_len,
         },
@@ -254,25 +262,8 @@ def setup_environment(config):
 
 def setup_data_loaders(config):
     """Setup training and validation data loaders"""
-    train_dataset, train_loader = build_dataloader(
-        dataset_name=config.dataset_name,
-        features=config.features, 
-        seq_len=config.seq_len, 
-        label_len=config.seq_len - 1, 
-        pred_len=1, 
-        flag='train', 
-        batch_size=config.batch_size,
-    )
-
-    validate_dataset, validate_loader = build_dataloader(
-        dataset_name=config.dataset_name,
-        features=config.features, 
-        seq_len=config.seq_len, 
-        label_len=config.seq_len - 1, 
-        pred_len=1, 
-        flag='val', 
-        batch_size=config.batch_size,
-    )
+    train_dataset, train_loader = data_provider(config, flag='train')
+    validate_dataset, validate_loader = data_provider(config, flag='val')
     
     print(f"Dataset: {config.dataset_name}, Features: {config.features}, "
           f"Batch Size: {config.batch_size}, Seq Len: {config.seq_len}")
@@ -288,7 +279,7 @@ def setup_data_loaders(config):
     return train_loader, validate_loader
 
 
-def setup_model(config):
+def setup_model(config, train_loader):
     """Setup model, optimizer, and tokenizer"""
     # Model initialization
     model_args = dict(
@@ -325,12 +316,8 @@ def setup_model(config):
     )
     
     # Tokenizer
-    tokenizer = build_tokenizer(
-        quant_range=config.quant_range,
-        vocab_size=config.vocab_size,
-        context_length=config.seq_len,
-        prediction_length=config.seq_len
-    )
+    # _, quant_info = find_quant_range(train_loader, epsilon=0.005)
+    tokenizer = build_tokenizer(config)
     
     # Gradient scaler
     scaler = torch.cuda.amp.GradScaler(enabled=(config.dtype == 'float16'))
@@ -373,7 +360,7 @@ def train_epoch(model, train_loader, optimizer, tokenizer, scaler, config, epoch
         bs, nvars, seq_len = x.shape
         x = x.reshape(bs * nvars, seq_len)
         y = y.reshape(bs * nvars, seq_len)
-        # print(f"Shape of x: {x.shape}, y: {y.shape}")
+
         # Get learning rate
         min_lr = config.learning_rate * config.min_lr_factor
         lr = get_lr(iteration, total_steps, config.warmup_steps, 
@@ -462,7 +449,7 @@ def main():
     train_loader, validate_loader = setup_data_loaders(config)
     
     # Setup model, optimizer, tokenizer
-    model, optimizer, tokenizer, scaler = setup_model(config)
+    model, optimizer, tokenizer, scaler = setup_model(config, train_loader)
     
     # Training setup
     num_batches = len(train_loader)

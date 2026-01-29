@@ -76,8 +76,8 @@ def _add_entrope_args(parser):
     # Tokenization
     parser.add_argument('--vocab_size', type=int, default=256, 
                         help='vocabulary size for byte-level tokenization')
-    parser.add_argument('--quant_range', type=int, default=6, 
-                        help='quantization range for tokenization')
+    # parser.add_argument('--quant_range', type=int, default=6, 
+    #                     help='quantization range for tokenization')
     parser.add_argument('--entropy_model_checkpoint_dir', type=str, 
                         default='./entropy_model_checkpoints/', 
                         help='directory for entropy model checkpoints')
@@ -85,28 +85,28 @@ def _add_entrope_args(parser):
                         help='model ID for saved entropy checkpoints')
     
     # Architecture - Layers
-    parser.add_argument('--n_layers_local_encoder', type=int, default=2, 
-                        help='number of local encoder layers')
-    parser.add_argument('--n_layers_local_decoder', type=int, default=2, 
-                        help='number of local decoder layers')
-    parser.add_argument('--n_layers_global', type=int, default=2, 
-                        help='number of global layers')
+    # parser.add_argument('--n_layers_local_encoder', type=int, default=2, 
+    #                     help='number of local encoder layers')
+    # parser.add_argument('--n_layers_local_decoder', type=int, default=2, 
+    #                     help='number of local decoder layers')
+    # parser.add_argument('--n_layers_global', type=int, default=2, 
+    #                     help='number of global layers')
     
     # Architecture - Dimensions
-    parser.add_argument('--dim_global', type=int, default=32, 
-                        help='dimension of global representation')
-    parser.add_argument('--dim_local_encoder', type=int, default=16, 
-                        help='dimension of local encoder representation')
-    parser.add_argument('--dim_local_decoder', type=int, default=16, 
-                        help='dimension of local decoder representation')
+    # parser.add_argument('--dim_global', type=int, default=32, 
+    #                     help='dimension of global representation')
+    # parser.add_argument('--dim_local_encoder', type=int, default=16, 
+    #                     help='dimension of local encoder representation')
+    # parser.add_argument('--dim_local_decoder', type=int, default=16, 
+    #                     help='dimension of local decoder representation')
     
     # Architecture - Attention heads
-    parser.add_argument('--n_heads_local_encoder', type=int, default=4, 
-                        help='number of local encoder attention heads')
-    parser.add_argument('--n_heads_local_decoder', type=int, default=4, 
-                        help='number of local decoder attention heads')
-    parser.add_argument('--n_heads_global', type=int, default=4, 
-                        help='number of global attention heads')
+    # parser.add_argument('--n_heads_local_encoder', type=int, default=4, 
+    #                     help='number of local encoder attention heads')
+    # parser.add_argument('--n_heads_local_decoder', type=int, default=4, 
+    #                     help='number of local decoder attention heads')
+    # parser.add_argument('--n_heads_global', type=int, default=4, 
+    #                     help='number of global attention heads')
     
     # Cross-attention configuration
     parser.add_argument('--cross_attn_k', type=int, default=1, 
@@ -143,8 +143,8 @@ def _add_entrope_args(parser):
                         help='general dropout rate')
     
     # Other EntroPE settings
-    parser.add_argument('--multiple_of', type=int, default=128, 
-                        help='dimension multiple for efficient computation')
+    # parser.add_argument('--multiple_of', type=int, default=128, 
+    #                     help='dimension multiple for efficient computation')
     parser.add_argument('--stride', type=int, default=8, 
                         help='stride for patching')
     parser.add_argument('--padding_patch', type=str, default='end', 
@@ -260,15 +260,15 @@ def generate_setting_name(args):
         f"{args.model}_{args.data}"
         f"_SL{args.seq_len}"
         f"_PL{args.pred_len}"
-        f"_GL{args.n_layers_global}"
-        f"_EL{args.n_layers_local_encoder}"
-        f"_DL{args.n_layers_local_decoder}"
-        f"_GD{args.dim_global}"
-        f"_DD{args.dim_local_decoder}"
-        f"_ED{args.dim_local_encoder}"
-        f"_GH{args.n_heads_global}"
-        f"_EH{args.n_heads_local_encoder}"
-        f"_DH{args.n_heads_local_decoder}"
+        f"_GL{args.e_layers}"
+        f"_EL{args.e_layers}"
+        f"_DL{args.e_layers}"
+        f"_GD{args.d_model}"
+        f"_DD{args.d_model}"
+        f"_ED{args.d_model}"
+        f"_GH{args.n_heads}"
+        f"_EH{args.n_heads}"
+        f"_DH{args.n_heads}"
     )
 
 

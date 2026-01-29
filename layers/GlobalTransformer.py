@@ -1,5 +1,8 @@
 """
-GlobalTransformer module for processing global patch-level representations.
+GlobalTransformer: Processes global patch-level representations.
+
+This module applies transformer layers to patch-level embeddings to capture
+global dependencies across patches in the sequence.
 """
 
 from typing import List, Optional, Tuple, Union
@@ -8,16 +11,19 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from bytelatent.model.latent_transformer import BaseTransformer, BaseTransformerArgs
-from bytelatent.model.utils import create_causal_mask
+from layers.Args import BaseTransformerArgs
+from layers.BaseTransformer import BaseTransformer
 
 
 class GlobalTransformer(BaseTransformer):
     """
-    Global transformer that processes patch-level embeddings.
+    Global transformer for patch-level processing.
     
-    Extends BaseTransformer with optional token embedding projection and
-    positional embeddings for global-level sequence processing.
+    Processes patch embeddings through transformer layers to capture global
+    context. Optionally projects input embeddings to the model dimension.
+    
+    Args:
+        args: Configuration arguments for the transformer
     """
     
     def __init__(self, args: BaseTransformerArgs):
@@ -27,19 +33,19 @@ class GlobalTransformer(BaseTransformer):
         self.eos_id = args.eos_id
         self.dim_token_emb = args.dim_token_emb
         
-        # Optional projection from token embedding dimension to model dimension
-        self.token_embedding_projection = None
+        # Optional projection from embedding dimension to model dimension
+        self.token_embedding_projection = self._init_embedding_projection(args)
+    
+    def _init_embedding_projection(self, args: BaseTransformerArgs) -> Optional[nn.Linear]:
+        """
+        Initialize embedding projection layer if dimensions don't match.
+        
+        Returns:
+            Linear projection layer or None if dimensions match
+        """
         if args.dim_token_emb is not None and args.dim_token_emb != self.dim:
-            self.token_embedding_projection = nn.Linear(
-                args.dim_token_emb,
-                args.dim,
-                bias=False,
-            )
-        
-        # Positional embeddings
-        self.pos_embeddings = nn.Embedding(self.max_seqlen, args.dim)
-        
-        print(f"[Global] Token embedding projection: {self.token_embedding_projection}")
+            return nn.Linear(args.dim_token_emb, args.dim, bias=False)
+        return None
     
     def forward(
         self,
@@ -48,41 +54,24 @@ class GlobalTransformer(BaseTransformer):
         embeds: Optional[torch.Tensor] = None,
         mask: Optional[Union[torch.Tensor, str]] = None,
         cache: Optional[List[Tuple[torch.Tensor, torch.Tensor, int]]] = None,
-    ) -> Tuple[torch.Tensor, Optional[List]]:
+    ):
         """
-        Forward pass through the global transformer.
+        Forward pass through global transformer.
         
         Args:
-            tokens: Token IDs of shape [batch_size, seq_len]
-            tok_idx: Optional token position indices
-            embeds: Pre-computed embeddings of shape [batch_size, seq_len, dim_token_emb]
-            mask: Attention mask
-            cache: KV cache for generation
+            tokens: Token IDs for shape reference (batch_size, seq_len)
+            tok_idx: Optional token indices
+            embeds: Patch embeddings (batch_size, num_patches, dim)
+            mask: Attention mask (optional)
+            cache: Optional KV cache for inference
             
         Returns:
-            Tuple of (hidden_states, cache)
+            Tuple of (transformed_embeddings, cache)
         """
         bs, seqlen = tokens.shape
-        
-        # Use provided embeddings
         h = embeds
         
-        # Add positional embeddings
-        pos_ids = torch.arange(seqlen, device=h.device).unsqueeze(0)  # [1, seq_len]
-        pos_emb = self.pos_embeddings(pos_ids)                        # [1, seq_len, dim]
-        h = h + pos_emb
-        
-        # Create causal mask if not provided
-        if mask is None:
-            mask = create_causal_mask(
-                seqlen,
-                self.attn_impl,
-                self.attn_bias_type,
-                tokens=tokens,
-                eos_id=self.eos_id,
-            )
-        
-        # Project to model dimension if needed
+        # Project embeddings to model dimension if needed
         if self.token_embedding_projection is not None and h.shape[-1] != self.dim:
             h = self.token_embedding_projection(h)
         
@@ -94,21 +83,3 @@ class GlobalTransformer(BaseTransformer):
         
         return h, cache
     
-    def init_weights(self):
-        """
-        Initialize model weights.
-        
-        Uses truncated normal initialization for the token embedding projection
-        with std based on the token embedding dimension.
-        """
-        super().init_weights()
-        
-        if self.token_embedding_projection is not None:
-            std = self.dim_token_emb ** (-0.5)
-            nn.init.trunc_normal_(
-                self.token_embedding_projection.weight,
-                mean=0.0,
-                std=std,
-                a=-3 * std,
-                b=3 * std,
-            )
