@@ -1,3 +1,20 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This file contains code adapted from Meta's Byte Latent Transformer
+# implementation (https://github.com/facebookresearch/blt).
+#
+# Modifications and extensions:
+#   - Entropy-guided dynamic patching
+#   - Adaptive patch encoder
+#   - Time-series specific modeling components
+#   - Percentile based thresholding for entropy computation
+#
+# Copyright (c) 2026 Sachith Abeywickrama
+#
+# Licensed under the same license as the original Meta code.
+
+
 __all__ = ['EntroPE_backbone']
 
 import torch

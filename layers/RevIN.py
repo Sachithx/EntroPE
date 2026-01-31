@@ -1,4 +1,9 @@
-# code from https://github.com/ts-kim/RevIN, with minor modifications
+# Code adapted from the RevIN implementation by ts-kim:
+# https://github.com/ts-kim/RevIN
+#
+# Original license applies.
+# Minor modifications were made for integration into this project.
+
 
 import torch
 import torch.nn as nn
