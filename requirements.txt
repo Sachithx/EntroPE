@@ -1,15 +1,11 @@
-# Core ML/DL dependencies
 torch
 numpy
 pandas
 scipy
 scikit-learn
-
-# Training utilities
 accelerate>=0.20.0
 datasets>=2.0.0
 evaluate>=0.4.0
-
-# Visualization and analysis
 matplotlib>=3.5.0
 ptflops>=0.6.0
+pydantic
