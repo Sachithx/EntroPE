@@ -9,26 +9,12 @@ import torch
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.attention.flex_attention import (
-    BlockMask,
-    _mask_mod_signature,
-    flex_attention,
-)
 
 from layers.Constants import Constants
 
 logger = logging.getLogger()
 
 RMSNorm = nn.RMSNorm
-
-# ============================================================
-# Flex Attention Compilation Control
-# ============================================================
-
-if int(os.environ.get("BLT_ALLOW_MISSING_FLEX_ATTENTION", False)) == 0:
-    flex_attention_comp = torch.compile(flex_attention)
-else:
-    flex_attention_comp = None
 
 
 # ============================================================
