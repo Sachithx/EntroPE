@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 from models.GPT2EntropyModel import GPTConfig, GPT
 from utils.train_utils import get_lr
-from utils.patch_utils import build_tokenizer
+from layers.Tokenizer import build_tokenizer
 from data_provider.data_factory import data_provider
 
 # ============================================================================
