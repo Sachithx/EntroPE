@@ -380,8 +380,8 @@ class EntroPE_backbone(nn.Module):
             patch_size=configs.max_patch_length,
             patch_in_forward=True,
             patching_batch_size=configs.enc_in * configs.batch_size,
-            patching_device="cuda",
-            patching_mode="entropy",
+            patching_device=getattr(configs, 'patching_device', 'cuda'),
+            patching_mode=getattr(configs, 'boundary_method', 'entropy'),
             patching_threshold=configs.patching_threshold,
             max_patch_length=configs.max_patch_length,
             monotonicity=configs.monotonicity,
@@ -461,7 +461,8 @@ class EntroPE_backbone(nn.Module):
         
         # Tokenize input
         z, _, _ = self.tokenizer.context_input_transform(z)
-        z = z.cuda()
+        device = next(self.backbone.parameters()).device
+        z = z.to(device)
         
         # Pass through EntroPE backbone
         z = self.backbone(z)  # [bs * nvars, seq_len, d_model]

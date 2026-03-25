@@ -1,4 +1,5 @@
 #!/bin/bash
+source "$(dirname "$0")/run.sh"
 
 mkdir -p ./logs/LongForecasting
 
@@ -55,7 +56,7 @@ for pred_len in 96; do
     
     echo "Running $seq_len -> $pred_len ..."
     
-    python -u run_longExp.py \
+    $PYTHON -u run_longExp.py \
         --model $model \
         --data $data \
         --features $features \

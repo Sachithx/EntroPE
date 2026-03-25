@@ -9,6 +9,7 @@
 #   - Adaptive patch encoder
 #   - Time-series specific modeling components
 #   - Percentile based thresholding for entropy computation
+#   - Alternative boundary detection methods (LocalDiff, VarianceCP, CUSUM, Random)
 #
 # Copyright (c) 2026 Sachith Abeywickrama
 #
@@ -17,6 +18,7 @@
 
 """
 Patcher (Entropy-Guided Dynamic Patching with Pre-trained GPT Entropy Model)
+Supports multiple boundary detection strategies for ablation studies.
 """
 
 import math
@@ -42,8 +44,14 @@ logger = logging.getLogger()
 # ============================================================
 
 class PatchingModeEnum(str, Enum):
-    entropy = "entropy"
-    static = "static"
+    entropy          = "entropy"           # conditional entropy from frozen GPT
+    static           = "static"            # uniform fixed-length patches
+    local_diff       = "local_diff"        # |x_t - x_{t-1}| peaks
+    variance_cp      = "variance_cp"       # sliding window variance ratio
+    cusum            = "cusum"             # cumulative sum change-point
+    random           = "random"            # random boundaries (same avg count)
+    empirical_entropy = "empirical_entropy" # EAPformer-style: Shannon entropy of value distribution
+    frequency_based  = "frequency_based"   # spectral energy shift (short-time FFT)
 
 
 class PatcherArgs(BaseModel):
@@ -60,6 +68,9 @@ class PatcherArgs(BaseModel):
     device: str = "cuda"
     monotonicity: bool = False
     log_time: bool = False
+    variance_window: int = 4      # half-window for variance_cp method
+    freq_window: int = 16         # window length for frequency_based FFT
+    empirical_bins: int = 16      # histogram bins for empirical_entropy
 
     def build(self) -> "Patcher":
         return Patcher(self)
@@ -152,7 +163,7 @@ def calculate_entropies(
 
 
 # ============================================================
-# Patch Mask Logic
+# Entropy-Based Patch Mask Logic
 # ============================================================
 
 def patch_start_mask_from_entropy_with_monotonicity(entropies, threshold):
@@ -178,6 +189,220 @@ def patch_start_mask_from_entropy_with_monotonicity_adaptive(entropies, threshol
         diffs = entropies[:, 1:] - entropies[:, :-1]
         mask[:, 1:] = diffs > threshold.unsqueeze(1)
 
+    return mask
+
+
+# ============================================================
+# Alternative Boundary Detection Methods
+# ============================================================
+
+def patch_start_mask_from_local_diff(tokens: torch.Tensor,
+                                     quantile_threshold: float) -> torch.Tensor:
+    """
+    LocalDiff: boundaries at positions where |token[t] - token[t-1]|
+    exceeds the quantile_threshold-th quantile of all differences.
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    diffs = torch.abs(tokens_f[:, 1:] - tokens_f[:, :-1])   # (bs, seq_len-1)
+
+    # Clamp to [0,1] to avoid quantile issues with uniform sequences
+    if diffs.numel() > 0 and diffs.max() > 0:
+        threshold = torch.quantile(diffs, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = torch.zeros(bs, seq_len, dtype=torch.bool, device=tokens.device)
+    mask[:, 0] = True
+    mask[:, 1:] = diffs > threshold
+    return mask
+
+
+def patch_start_mask_from_variance_cp(tokens: torch.Tensor,
+                                       window: int,
+                                       quantile_threshold: float) -> torch.Tensor:
+    """
+    VarianceCP: sliding window variance change-point detection.
+    For each position t, compare variance of left vs right windows.
+    Boundaries where the ratio is high (high variance contrast).
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    eps = 1e-6
+    window = max(2, min(window, seq_len // 4))  # safety clamp
+
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+
+    # Use unfold for efficiency
+    # left window: tokens_f[:, t-window:t], right: tokens_f[:, t:t+window]
+    if seq_len > 2 * window:
+        # Unfold into windows: shape (bs, num_positions, window)
+        left_windows = tokens_f.unfold(1, window, 1)   # (bs, seq_len-window+1, window)
+        right_windows = tokens_f.unfold(1, window, 1)
+
+        left_var  = left_windows.var(dim=2)   # (bs, seq_len-window+1)
+        right_var = right_windows.var(dim=2)
+
+        # Align: for position t, left covers [t-window, t), right covers [t, t+window)
+        # left_var[t] = var of tokens[t:t+window], right_var[t+window] = var of tokens[t+window:t+2*window]
+        # So boundary score at position t+window = max/min ratio
+        n_pos = left_windows.shape[1] - window
+        if n_pos > 0:
+            lv = left_var[:, :n_pos]
+            rv = right_var[:, window:window + n_pos]
+            ratio = (torch.max(lv, rv) / (torch.min(lv, rv) + eps)).float()
+            scores[:, window: window + n_pos] = ratio
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = torch.zeros(bs, seq_len, dtype=torch.bool, device=tokens.device)
+    mask[:, 0] = True
+    mask[:, 1:] = scores[:, 1:] > threshold
+    return mask
+
+
+def patch_start_mask_from_cusum(tokens: torch.Tensor,
+                                 quantile_threshold: float) -> torch.Tensor:
+    """
+    CUSUM: cumulative sum of (token - mean).
+    Large absolute CUSUM values indicate regime change points.
+    Returns boolean mask (bs, seq_len).
+    """
+    tokens_f = tokens.float()
+    mean = tokens_f.mean(dim=1, keepdim=True)
+    deviations = tokens_f - mean
+    cusum = torch.cumsum(deviations, dim=1)
+    scores = torch.abs(cusum)
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(tokens.shape[0], 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_from_empirical_entropy(tokens: torch.Tensor,
+                                              window: int,
+                                              quantile_threshold: float,
+                                              n_bins: int = 16) -> torch.Tensor:
+    """
+    EAPformer-style empirical Shannon entropy boundary detection.
+    For each position t, compute the Shannon entropy of the empirical value
+    distribution within a sliding window of length `window` centred at t.
+    Boundaries are placed where this entropy is HIGH (value distribution is
+    more spread out / more uncertain), which is EAPformer's Eq. 4 concept.
+
+    Key difference from EntroPE: this measures *within-window distributional spread*
+    (statistical entropy), whereas EntroPE measures *predictive uncertainty* of the
+    next token given causal history (conditional entropy from a learned model).
+
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    half_w = max(1, window // 2)
+    eps = 1e-8
+
+    # Compute empirical Shannon entropy for each position using sliding window
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+
+    # Use torch.unfold to create overlapping windows
+    # Pad to keep output length == seq_len
+    padded = torch.nn.functional.pad(tokens_f, (half_w, half_w), mode='replicate')
+    # Shape: (bs, seq_len, window)
+    windows = padded.unfold(1, window, 1)[:, :seq_len, :]
+
+    # Compute histogram-based entropy for each window
+    # Normalise token values to [0, n_bins)
+    tok_min = tokens_f.min(dim=1, keepdim=True)[0]
+    tok_max = tokens_f.max(dim=1, keepdim=True)[0]
+    tok_range = (tok_max - tok_min).clamp(min=eps)
+
+    for b in range(bs):
+        win_b = windows[b]  # (seq_len, window)
+        # Normalise windows to [0, n_bins)
+        normed = ((win_b - tok_min[b]) / tok_range[b] * (n_bins - 1)).clamp(0, n_bins - 1)
+        normed_int = normed.long()  # (seq_len, window)
+
+        for t in range(seq_len):
+            counts = torch.bincount(normed_int[t], minlength=n_bins).float()
+            p = counts / counts.sum()
+            p = p[p > 0]
+            scores[b, t] = -(p * p.log()).sum()
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_from_frequency(tokens: torch.Tensor,
+                                     window: int,
+                                     quantile_threshold: float) -> torch.Tensor:
+    """
+    Frequency-based boundary detection: boundaries at positions where the
+    dominant spectral content shifts between adjacent short-time windows.
+    Uses the L2 distance between consecutive window FFT magnitude spectra.
+
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    half_w = max(1, window // 2)
+
+    # Pad and create overlapping windows (bs, seq_len, window)
+    padded = torch.nn.functional.pad(tokens_f, (half_w, half_w), mode='replicate')
+    windows = padded.unfold(1, window, 1)[:, :seq_len, :]  # (bs, seq_len, window)
+
+    # Apply Hann window to reduce spectral leakage
+    hann = torch.hann_window(window, device=tokens.device)
+    windows = windows * hann.unsqueeze(0).unsqueeze(0)
+
+    # Compute FFT magnitude spectra: (bs, seq_len, window//2+1)
+    spectra = torch.fft.rfft(windows, dim=-1).abs()
+    # Normalise each spectrum
+    spec_norm = spectra / (spectra.sum(dim=-1, keepdim=True) + 1e-8)
+
+    # Spectral shift score = L2 distance between adjacent spectra
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+    if seq_len > 1:
+        diff = (spec_norm[:, 1:, :] - spec_norm[:, :-1, :]).pow(2).sum(dim=-1).sqrt()
+        scores[:, 1:] = diff
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_random(tokens: torch.Tensor,
+                             avg_patch_size: float) -> torch.Tensor:
+    """
+    Random: random boundary placement with same average boundary count
+    as entropy-based method (expected 1 boundary per avg_patch_size tokens).
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    p_boundary = 1.0 / max(avg_patch_size, 1.0)
+    rand = torch.rand(bs, seq_len, device=tokens.device)
+    mask = rand < p_boundary
+    mask[:, 0] = True  # first position is always a patch start
     return mask
 
 
@@ -278,7 +503,7 @@ def rightpad(seq, pad_id, max_len):
 # ============================================================
 
 class Patcher:
-    """Dynamic patcher supporting static and entropy-based segmentation."""
+    """Dynamic patcher supporting multiple boundary detection strategies."""
 
     def __init__(self, args: PatcherArgs):
         self.args = args
@@ -290,21 +515,28 @@ class Patcher:
         self.batch_size = args.patching_batch_size
         self.device = args.device
         self.log_time = args.log_time
+        self.variance_window = args.variance_window
+        self.freq_window = args.freq_window
+        self.empirical_bins = args.empirical_bins
 
         if self.log_time:
             self.log = defaultdict(float)
 
-        self.state_path = os.path.join(
-            args.entropy_model_checkpoint_dir,
-            f"{args.dataset_name}.pt"
-        )
-
+        # Only load the entropy model when needed
         self._entropy_models = {}
+        self._base_entropy_model = None
 
-        self._base_entropy_model, _ = load_entropy_model(
-            args.entropy_model_checkpoint_dir,
-            self.state_path,
-        )
+        if self.patching_mode == PatchingModeEnum.entropy:
+            self.state_path = os.path.join(
+                args.entropy_model_checkpoint_dir,
+                f"{args.dataset_name}.pt"
+            )
+            self._base_entropy_model, _ = load_entropy_model(
+                args.entropy_model_checkpoint_dir,
+                self.state_path,
+            )
+        else:
+            self.state_path = None
 
     # ---------------------------------------
     # Entropy model device cache
@@ -323,6 +555,31 @@ class Patcher:
         return self._entropy_models[key]
 
     # ---------------------------------------
+    # Postprocess patch lengths (shared logic)
+    # ---------------------------------------
+
+    def _postprocess_patch_lengths(self, patch_lengths, tokens, include_next_token):
+        """Apply max_patch_length splitting and assert correctness."""
+        bs = tokens.shape[0]
+
+        if self.max_patch_length is not None:
+            patch_lengths = [
+                split_large_numbers(pl, self.max_patch_length)
+                for pl in patch_lengths.tolist()
+            ]
+            max_len = max(len(pl) for pl in patch_lengths)
+            patch_lengths = torch.tensor(
+                [rightpad(pl, 0, max_len) for pl in patch_lengths],
+                device=tokens.device
+            )
+
+        expected = tokens.numel() + include_next_token * bs
+        assert patch_lengths.sum().item() == expected, (
+            f"patch_lengths sum {patch_lengths.sum().item()} != expected {expected}"
+        )
+        return patch_lengths
+
+    # ---------------------------------------
     # Main patching entry point
     # ---------------------------------------
 
@@ -339,6 +596,55 @@ class Patcher:
                 patch_lengths[:, -1] = seq_len_eff % self.patch_size
 
             return patch_lengths, None
+
+        # ---------- LOCAL DIFF ----------
+        elif self.patching_mode == PatchingModeEnum.local_diff:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_local_diff(tokens, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- VARIANCE CP ----------
+        elif self.patching_mode == PatchingModeEnum.variance_cp:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_variance_cp(tokens, self.variance_window, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- CUSUM ----------
+        elif self.patching_mode == PatchingModeEnum.cusum:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_cusum(tokens, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- RANDOM ----------
+        elif self.patching_mode == PatchingModeEnum.random:
+            mask = patch_start_mask_random(tokens, self.patch_size)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- EMPIRICAL ENTROPY (EAPformer-style) ----------
+        elif self.patching_mode == PatchingModeEnum.empirical_entropy:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_empirical_entropy(
+                tokens, self.freq_window, qt, self.empirical_bins
+            )
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- FREQUENCY-BASED ----------
+        elif self.patching_mode == PatchingModeEnum.frequency_based:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_frequency(tokens, self.freq_window, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
 
         # ---------- ENTROPY ----------
         t0 = time.time() if self.log_time else None
@@ -365,22 +671,7 @@ class Patcher:
 
         patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
 
-        # ---------- POSTPROCESS ----------
-        if self.max_patch_length is not None:
-            patch_lengths = [
-                split_large_numbers(pl, self.max_patch_length)
-                for pl in patch_lengths.tolist()
-            ]
-            max_len = max(len(pl) for pl in patch_lengths)
-            patch_lengths = torch.tensor(
-                [rightpad(pl, 0, max_len) for pl in patch_lengths],
-                device=tokens.device
-            )
-
-        expected = tokens.numel() + include_next_token * bs
-        assert patch_lengths.sum().item() == expected
-
-        return patch_lengths, scores
+        return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), scores
 
 
 # ============================================================

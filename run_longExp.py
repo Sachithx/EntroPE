@@ -105,9 +105,15 @@ def _add_entrope_args(parser):
                         help='entropy patching threshold')
     parser.add_argument('--patching_threshold_add', type=float, default=0.2, 
                         help='additional patching threshold')
-    parser.add_argument('--monotonicity', type=int, default=0, 
+    parser.add_argument('--monotonicity', type=int, default=0,
                         help='monotonic patching (1: True, 0: False)')
-    
+    parser.add_argument('--boundary_method', type=str, default='entropy',
+                        choices=['entropy', 'static', 'local_diff', 'variance_cp',
+                                 'cusum', 'random', 'empirical_entropy', 'frequency_based'],
+                        help='boundary detection method: entropy (EntroPE default), '
+                             'static, local_diff, variance_cp, cusum, random, '
+                             'empirical_entropy (EAPformer-style), frequency_based')
+
     # Regularization
     parser.add_argument('--fc_dropout', type=float, default=0.1, 
                         help='fully connected layer dropout')
@@ -228,6 +234,7 @@ def configure_gpu(args):
 
 def generate_setting_name(args):
     """Generate experiment setting name"""
+    bm = getattr(args, 'boundary_method', 'entropy')
     return (
         f"{args.model}_{args.data}"
         f"_SL{args.seq_len}"
@@ -238,6 +245,7 @@ def generate_setting_name(args):
         f"_MP{args.max_patch_length}"
         f"_TH{args.patching_threshold}"
         f"_MO{args.monotonicity}"
+        f"_BM{bm}"
         f"_LR{args.learning_rate}"
     )
 
