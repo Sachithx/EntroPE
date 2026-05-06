@@ -1,6 +1,7 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
 from models import EntroPE
+from models import EntroPE_v2
 from utils.tools import EarlyStopping, adjust_learning_rate, visual, test_params_flop
 from utils.metrics import metric
 
@@ -86,7 +87,8 @@ class Exp_Main(Exp_Basic):
 
     def _build_model(self):
         model_dict = {
-            'EntroPE': EntroPE
+            'EntroPE':    EntroPE,
+            'EntroPE_v2': EntroPE_v2,
         }
         model = model_dict[self.args.model].Model(self.args).float()
 
@@ -267,12 +269,18 @@ class Exp_Main(Exp_Basic):
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
                         batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
                         loss = criterion(outputs, batch_y)
+                        # EntroPE_v2: add auxiliary boundary + MVG losses
+                        if hasattr(self.model, 'auxiliary_losses'):
+                            loss = loss + self.model.auxiliary_losses()
                 else:
                     outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
                     loss = criterion(outputs, batch_y)
+                    # EntroPE_v2: add auxiliary boundary + MVG losses
+                    if hasattr(self.model, 'auxiliary_losses'):
+                        loss = loss + self.model.auxiliary_losses()
 
                 train_loss.append(loss.item())
 

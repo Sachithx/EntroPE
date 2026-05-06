@@ -52,9 +52,13 @@ class PatchingModeEnum(str, Enum):
     random           = "random"            # random boundaries (same avg count)
     empirical_entropy = "empirical_entropy" # EAPformer-style: Shannon entropy of value distribution
     frequency_based  = "frequency_based"   # spectral energy shift (short-time FFT)
+    cmi_threshold    = "cmi_threshold"     # MVG Gaussian + CMI signal + quantile threshold (fallback)
+    learned_cmi      = "learned_cmi"       # MVG Gaussian + learned boundary scorer (main v2 method)
 
 
 class PatcherArgs(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
+
     patching_mode: PatchingModeEnum = PatchingModeEnum.entropy
     dataset_name: str | None = None
     patching_device: str = "cuda"
@@ -72,6 +76,9 @@ class PatcherArgs(BaseModel):
     freq_window: int = 16         # window length for frequency_based FFT
     empirical_bins: int = 16      # histogram bins for empirical_entropy
 
+    # For cmi_threshold mode: pretrained MultivariateGaussianModel instance
+    mvg_model: object | None = None
+
     def build(self) -> "Patcher":
         return Patcher(self)
 
@@ -79,6 +86,25 @@ class PatcherArgs(BaseModel):
 # ============================================================
 # Entropy Model Loader
 # ============================================================
+
+def compute_cmi_signal(model, x: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the CMI (Covariance Matrix Information) boundary signal from a
+    pretrained MultivariateGaussianModel.
+
+    Args:
+        model: MultivariateGaussianModel instance (eval, no_grad).
+        x:     (B, L, C) raw real-valued multivariate time series.
+
+    Returns:
+        cmi: (B, L) signal — |Delta log|Sigma_t||, zero at t=0.
+    """
+    from models.MultivariateGaussianModel import MultivariateGaussianModel
+    with torch.no_grad():
+        mu, cov = model(x)
+        log_det = MultivariateGaussianModel.log_det(cov)
+        return MultivariateGaussianModel.cmi_signal(log_det)
+
 
 def load_entropy_model(checkpoint_dir, state_path, device="cpu"):
     """Load pretrained GPT entropy model."""
@@ -522,6 +548,9 @@ class Patcher:
         if self.log_time:
             self.log = defaultdict(float)
 
+        # MVG model for cmi_threshold mode
+        self._mvg_model = getattr(args, 'mvg_model', None)
+
         # Only load the entropy model when needed
         self._entropy_models = {}
         self._base_entropy_model = None
@@ -645,6 +674,35 @@ class Patcher:
             patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
             patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
             return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- CMI THRESHOLD ----------
+        # Multivariate Gaussian CMI signal + quantile threshold (no discrete tokenisation).
+        # tokens here is actually a float tensor (B, L, C) when called from the v2 path.
+        elif self.patching_mode == PatchingModeEnum.cmi_threshold:
+            assert self._mvg_model is not None, (
+                "cmi_threshold mode requires a MultivariateGaussianModel; "
+                "pass mvg_model= to PatcherArgs."
+            )
+            qt  = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            cmi = compute_cmi_signal(self._mvg_model, tokens)   # (B, L)
+            threshold = torch.quantile(cmi, qt, dim=1, keepdim=True)
+            mask = cmi > threshold
+            mask[:, 0] = True
+            patch_start_ids  = patch_start_ids_from_patch_start_mask(mask)
+            # patch_lengths derived from mask length (B, L) — no include_next_token shift
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), cmi
+
+        # ---------- LEARNED CMI ----------
+        # End-to-end differentiable; boundary computation lives inside EntroPE_v2.forward.
+        # Calling Patcher.patch() for this mode is a programming error.
+        elif self.patching_mode == PatchingModeEnum.learned_cmi:
+            raise NotImplementedError(
+                "patching_mode='learned_cmi' does not use Patcher.patch(). "
+                "Boundary decisions are computed inside EntroPE_v2.forward() via "
+                "GumbelSigmoidPatcher. Use --patching_mode learned_cmi only with "
+                "--model EntroPE_v2."
+            )
 
         # ---------- ENTROPY ----------
         t0 = time.time() if self.log_time else None

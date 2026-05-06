@@ -109,13 +109,58 @@ def _add_entrope_args(parser):
                         help='monotonic patching (1: True, 0: False)')
     parser.add_argument('--boundary_method', type=str, default='entropy',
                         choices=['entropy', 'static', 'local_diff', 'variance_cp',
-                                 'cusum', 'random', 'empirical_entropy', 'frequency_based'],
+                                 'cusum', 'random', 'empirical_entropy', 'frequency_based',
+                                 'cmi_threshold', 'learned_cmi'],
                         help='boundary detection method: entropy (EntroPE default), '
                              'static, local_diff, variance_cp, cusum, random, '
-                             'empirical_entropy (EAPformer-style), frequency_based')
+                             'empirical_entropy (EAPformer-style), frequency_based, '
+                             'cmi_threshold (MVG+CMI+threshold, v2 fallback), '
+                             'learned_cmi (end-to-end learned, requires --model EntroPE_v2)')
+
+    # ---- EntroPE_v2 / MVG model ----
+    parser.add_argument('--mvg_layers',   type=int,   default=2,
+                        help='MVG causal transformer layers')
+    parser.add_argument('--mvg_embd',     type=int,   default=64,
+                        help='MVG embedding dimension')
+    parser.add_argument('--mvg_heads',    type=int,   default=4,
+                        help='MVG attention heads')
+    parser.add_argument('--mvg_dropout',  type=float, default=0.1,
+                        help='MVG dropout')
+    parser.add_argument('--mvg_cov_rank', type=int,   default=None,
+                        help='MVG covariance rank (None=full Cholesky, int=low-rank+diag)')
+    parser.add_argument('--mvg_checkpoint', type=str, default=None,
+                        help='Path to pretrained MVG checkpoint (from pretrain_mvg.py)')
+
+    # ---- Boundary scorer ----
+    parser.add_argument('--scorer_hidden', type=int, default=64,
+                        help='Hidden dim of LearnedBoundaryScorer MLP')
+
+    # ---- Gumbel-sigmoid patcher ----
+    parser.add_argument('--gumbel_tau_init',  type=float, default=5.0,
+                        help='Initial Gumbel-sigmoid temperature')
+    parser.add_argument('--gumbel_tau_min',   type=float, default=0.5,
+                        help='Minimum Gumbel-sigmoid temperature (after annealing)')
+    parser.add_argument('--gumbel_tau_decay', type=int,   default=5000,
+                        help='Decay steps for Gumbel temperature annealing')
+
+    # ---- Patch-rate regularisation ----
+    parser.add_argument('--target_avg_patch_len', type=int,   default=8,
+                        help='Target average patch length (controls boundary rate)')
+    parser.add_argument('--min_patch_len',        type=int,   default=3,
+                        help='Minimum allowed patch length (penalised if violated)')
+    parser.add_argument('--lambda_count', type=float, default=10.0,
+                        help='Weight for patch-rate regulariser')
+    parser.add_argument('--lambda_min',   type=float, default=0.5,
+                        help='Weight for min-patch-length regulariser')
+    parser.add_argument('--lambda_div',   type=float, default=0.1,
+                        help='Weight for boundary-diversity regulariser')
+    parser.add_argument('--lambda_nll',   type=float, default=0.1,
+                        help='Weight for MVG calibration NLL term')
+    parser.add_argument('--beta_nll',     type=float, default=0.5,
+                        help='beta for Seitzer 2022 beta-NLL (0=MSE-like, 1=standard NLL)')
 
     # Regularization
-    parser.add_argument('--fc_dropout', type=float, default=0.1, 
+    parser.add_argument('--fc_dropout', type=float, default=0.1,
                         help='fully connected layer dropout')
     parser.add_argument('--head_dropout', type=float, default=0.1, 
                         help='prediction head dropout')

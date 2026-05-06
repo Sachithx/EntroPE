@@ -84,6 +84,12 @@ class PatchEncoder(LocalModelBase):
     # Embedding
     # ----------------------------------
     def apply_embedding(self, tokens, embeds):
+        # When pre-computed rich-token embeddings are supplied (e.g. from
+        # EntroPE_v2's token_proj), use them directly instead of the discrete
+        # token embedding table.  All existing non-v2 code paths pass embeds=None
+        # so this change is fully backward-compatible.
+        if embeds is not None:
+            return embeds
         return self.tok_embeddings(tokens)
 
     # ----------------------------------

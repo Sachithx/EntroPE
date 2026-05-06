@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(2>&1)",
+      "Bash(/home/AD/sachith/.conda/envs/entrope/bin/python run_longExp.py --model EntroPE --is_training 1 --data ETTh1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id_name ETTh1 --model_id ETTh1_diag5_oldEntroPE --features M --seq_len 96 --pred_len 96 --enc_in 7 --freq h --d_model 64 --n_heads 4 --e_layers 3 --d_ff 256 --max_patch_length 8 --patching_threshold 4.0 --monotonicity 0 --boundary_method entropy --dropout 0.1 --learning_rate 1e-4 --batch_size 64 --train_epochs 20 --patience 5 --itr 1 --des diag5 --gpu 0)",
+      "Bash(echo \"Diagnostic 5 PID: $!\")",
+      "Bash(/home/AD/sachith/.conda/envs/entrope/bin/python scripts/train_entrope_v2.py --data ETTh1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --seq_len 96 --pred_len 96 --label_len 48 --enc_in 7 --d_model 64 --n_heads 4 --global_layers 3 --dropout 0.1 --static_patch_len 8 --mvg_checkpoint ./checkpoints/mvg/mvg_ETTh1.pt --mvg_layers 2 --mvg_embd 64 --mvg_heads 4 --train_epochs 20 --batch_size 64 --learning_rate 1e-4 --patience 7 --lambda_count 0.0 --lambda_min 0.0 --lambda_div 0.0 --lambda_nll 0.1 --target_avg_patch_len 8 --min_patch_len 3 --model_id diag1_static_patch8 --gpu 0 --log_every 50)",
+      "Bash(/home/AD/sachith/.conda/envs/entrope/bin/python run_longExp.py --model EntroPE --is_training 1 --data ETTh1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id_name ETTh1 --model_id ETTh1_diag5_oldEntroPE --features M --seq_len 96 --pred_len 96 --enc_in 7 --freq h --d_model 64 --n_heads 4 --e_layers 3 --d_ff 256 --max_patch_length 8 --patching_threshold 0.5 --monotonicity 0 --boundary_method entropy --dropout 0.1 --learning_rate 1e-4 --batch_size 64 --train_epochs 20 --patience 5 --itr 1 --des diag5 --gpu 0)",
+      "Bash(xargs cat)",
+      "Bash(xargs ls -lt)",
+      "Bash(chmod +x /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/run_diagnostics.sh)",
+      "Bash(/home/AD/sachith/.conda/envs/entrope/bin/python -c ' *)",
+      "Bash(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)",
+      "Bash(chmod +x /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/traffic_v2.sh)",
+      "Bash(git pull *)",
+      "Bash(git rm *)",
+      "Bash(git rebase *)",
+      "Bash(GIT_EDITOR=true git rebase --continue)",
+      "Bash(git add *)"
+    ]
+  }
+}
