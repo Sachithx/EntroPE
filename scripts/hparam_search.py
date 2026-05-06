@@ -6,14 +6,17 @@ Hyperparameter search for EntroPE_v2, covering two backbone architectures:
   ape     — AdaptivePatchPooler + FusionForecastHead  (new, expressive)
 
 Runs experiments in parallel across 2 GPUs (one per GPU per batch).
-All experiments: ETTh1 96→96, CMI top-K patching, rich tokens.
+Default dataset: ETTh1 96→96, CMI top-K patching, rich tokens.
 
 Usage:
-    python scripts/hparam_search.py                      # all configs
-    python scripts/hparam_search.py --backbone simple    # simple only
-    python scripts/hparam_search.py --backbone ape       # APE+Fusion only
-    python scripts/hparam_search.py --dry-run            # print without running
-    python scripts/hparam_search.py --results            # parse existing results
+    python scripts/hparam_search.py                           # all configs, ETTh1
+    python scripts/hparam_search.py --dataset ETTh2           # run on ETTh2
+    python scripts/hparam_search.py --dataset ETTm1           # run on ETTm1
+    python scripts/hparam_search.py --dataset ETTm2           # run on ETTm2
+    python scripts/hparam_search.py --backbone simple         # simple only
+    python scripts/hparam_search.py --backbone ape            # APE+Fusion only
+    python scripts/hparam_search.py --dry-run                 # print without running
+    python scripts/hparam_search.py --results                 # parse existing results
 """
 
 import argparse
@@ -29,6 +32,15 @@ PYTHON      = str(Path(sys.executable))
 TRAIN_SCRIPT = str(ROOT / "scripts" / "train_entrope_v2.py")
 LOG_DIR     = ROOT / "logs" / "hparam_search"
 CKPT_DIR    = ROOT / "checkpoints"
+
+ETT_SMALL_PATH = ROOT / "dataset" / "ETT-small"
+
+DATASET_CONFIGS = {
+    "ETTh1": dict(data="ETTh1", root_path=str(ETT_SMALL_PATH), data_path="ETTh1.csv", freq="h", enc_in=7),
+    "ETTh2": dict(data="ETTh2", root_path=str(ETT_SMALL_PATH), data_path="ETTh2.csv", freq="h", enc_in=7),
+    "ETTm1": dict(data="ETTm1", root_path=str(ETT_SMALL_PATH), data_path="ETTm1.csv", freq="t", enc_in=7),
+    "ETTm2": dict(data="ETTm2", root_path=str(ETT_SMALL_PATH), data_path="ETTm2.csv", freq="t", enc_in=7),
+}
 
 
 # ================================================================
@@ -139,15 +151,16 @@ def k_max(rate: float, seq_len: int = 96) -> int:
     return math.floor(seq_len * rate) + 2
 
 
-def build_cmd(cfg: dict, gpu: int, mid: str) -> list:
+def build_cmd(cfg: dict, gpu: int, mid: str, ds: dict) -> list:
     cmd = [
         PYTHON, TRAIN_SCRIPT,
-        "--data",       "ETTh1",
-        "--root_path",  str(ROOT / "dataset" / "ETT-small"),
-        "--data_path",  "ETTh1.csv",
+        "--data",       ds["data"],
+        "--root_path",  ds["root_path"],
+        "--data_path",  ds["data_path"],
+        "--freq",       ds["freq"],
+        "--enc_in",     str(ds["enc_in"]),
         "--seq_len",    "96",
         "--pred_len",   "96",
-        "--enc_in",     "7",
         "--cmi_threshold", str(cfg['rate']),
         "--k_max_estimate", str(k_max(cfg['rate'])),
         "--lambda_count", "0.0",
@@ -190,8 +203,11 @@ def parse_result(path: Path):
     return mse, mae
 
 
-def run_experiment(cfg: dict, gpu: int) -> dict:
-    mid      = config_id(cfg)
+def run_experiment(cfg: dict, gpu: int, ds: dict | None = None) -> dict:
+    if ds is None:
+        ds = DATASET_CONFIGS["ETTh1"]
+    ds_tag   = ds["data"]
+    mid      = f"{ds_tag}_{config_id(cfg)}"
     log_path = LOG_DIR / f"{mid}.log"
     result_path = CKPT_DIR / mid / "result.txt"
 
@@ -201,7 +217,7 @@ def run_experiment(cfg: dict, gpu: int) -> dict:
         return {**cfg, 'model_id': mid, 'mse': mse, 'mae': mae, 'status': 'cached'}
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    cmd = build_cmd(cfg, gpu, mid)
+    cmd = build_cmd(cfg, gpu, mid, ds)
 
     t0 = time.time()
     with open(log_path, "w") as fout:
@@ -281,6 +297,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backbone", choices=["simple", "ape", "all"],
                         default="all", help="Which backbone configs to run")
+    parser.add_argument("--dataset", choices=list(DATASET_CONFIGS.keys()),
+                        default="ETTh1", help="Dataset to run hparam search on")
     parser.add_argument("--dry-run",  action="store_true",
                         help="Print configs without running")
     parser.add_argument("--results",  action="store_true",
@@ -288,6 +306,7 @@ def main():
     parser.add_argument("--gpus", default="0,1",
                         help="Comma-separated GPU ids (default: 0,1)")
     args = parser.parse_args()
+    ds = DATASET_CONFIGS[args.dataset]
 
     gpu_ids = [int(g) for g in args.gpus.split(",")]
     n_gpus  = len(gpu_ids)
@@ -300,25 +319,25 @@ def main():
         configs = ALL_CONFIGS
 
     if args.dry_run:
-        print(f"{len(configs)} configs  ({len(SIMPLE_CONFIGS)} simple, "
-              f"{len(APE_CONFIGS)} ape)  {n_gpus} GPUs  "
-              f"~{math.ceil(len(configs) / n_gpus) * 4} min\n")
+        print(f"Dataset: {args.dataset}  |  {len(configs)} configs  "
+              f"({len(SIMPLE_CONFIGS)} simple, {len(APE_CONFIGS)} ape)  "
+              f"{n_gpus} GPUs  ~{math.ceil(len(configs) / n_gpus) * 4} min\n")
         for cfg in configs:
             bb = "[APE]" if cfg['backbone'] == 'ape' else "[SIM]"
-            print(f"  {bb} {config_id(cfg)}")
+            print(f"  {bb} {args.dataset}_{config_id(cfg)}")
         return
 
     if args.results:
         results = []
         for cfg in ALL_CONFIGS:
-            rp = CKPT_DIR / config_id(cfg) / "result.txt"
+            rp = CKPT_DIR / f"{args.dataset}_{config_id(cfg)}" / "result.txt"
             if rp.exists():
                 mse, mae = parse_result(rp)
                 results.append({**cfg, 'mse': mse, 'mae': mae})
         print_results(results)
         return
 
-    print(f"Running {len(configs)} configs  "
+    print(f"Dataset: {args.dataset}  |  Running {len(configs)} configs  "
           f"({sum(c['backbone']=='simple' for c in configs)} simple, "
           f"{sum(c['backbone']=='ape' for c in configs)} ape)")
     print(f"GPUs: {gpu_ids}  |  Logs: {LOG_DIR}\n")
@@ -336,7 +355,7 @@ def main():
         )
         print(f"--- Batch {idx}/{len(batches)} [{bb_tags}] ---")
         with ProcessPoolExecutor(max_workers=n_gpus) as pool:
-            futures = {pool.submit(run_experiment, cfg, gpu): cfg
+            futures = {pool.submit(run_experiment, cfg, gpu, ds): cfg
                        for cfg, gpu in batch}
             for fut in as_completed(futures):
                 results.append(fut.result())

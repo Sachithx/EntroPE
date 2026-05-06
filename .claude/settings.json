@@ -16,7 +16,9 @@
       "Bash(git rm *)",
       "Bash(git rebase *)",
       "Bash(GIT_EDITOR=true git rebase --continue)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(chmod +x /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/ETTh1_v2.sh /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/ETTh2_v2.sh /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/ETTm1_v2.sh /home/AD/sachith/PRECEPT_BASELINES/EntroPE/scripts/ETTm2_v2.sh)",
+      "Bash(/home/AD/sachith/.conda/envs/entrope/bin/python scripts/hparam_search.py --dataset ETTm1 --dry-run)"
     ]
   }
 }
