@@ -104,8 +104,8 @@ EntroPE achieves significant improvements over existing methods:
 If you found this work useful for you, please consider citing it.
 
 ```bibtex
-@article{abeywickrama2025entrope,
-  title={EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting},
+@article{abeywickrama2025entropy,
+  title={Entropy Guided Dynamic Patch Segmentation for Time Series Transformers},
   author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
   journal={arXiv preprint arXiv:2509.26157},
   year={2025}
