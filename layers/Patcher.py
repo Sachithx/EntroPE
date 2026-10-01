@@ -1,6 +1,24 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This file contains code adapted from Meta's Byte Latent Transformer
+# implementation (https://github.com/facebookresearch/blt).
+#
+# Modifications and extensions:
+#   - Entropy-guided dynamic patching
+#   - Adaptive patch encoder
+#   - Time-series specific modeling components
+#   - Percentile based thresholding for entropy computation
+#   - Alternative boundary detection methods (LocalDiff, VarianceCP, CUSUM, Random)
+#
+# Copyright (c) 2026 Sachith Abeywickrama
+#
+# Licensed under the same license as the original Meta code.
+
+
 """
-Patcher module for dynamic patching of token sequences based on entropy.
-Copyright (c) Meta Platforms, Inc. and affiliates.
+Patcher (Entropy-Guided Dynamic Patching with Pre-trained GPT Entropy Model)
+Supports multiple boundary detection strategies for ablation studies.
 """
 
 import math
@@ -21,85 +39,121 @@ from models.GPT2EntropyModel import GPTConfig, GPT
 
 logger = logging.getLogger()
 
+# ============================================================
+# Enums & Config
+# ============================================================
+
 class PatchingModeEnum(str, Enum):
-    """Enumeration of available patching modes"""
-    entropy = "entropy"
-    static = "static"
+    entropy          = "entropy"           # conditional entropy from frozen GPT
+    static           = "static"            # uniform fixed-length patches
+    local_diff       = "local_diff"        # |x_t - x_{t-1}| peaks
+    variance_cp      = "variance_cp"       # sliding window variance ratio
+    cusum            = "cusum"             # cumulative sum change-point
+    random           = "random"            # random boundaries (same avg count)
+    empirical_entropy = "empirical_entropy" # EAPformer-style: Shannon entropy of value distribution
+    frequency_based  = "frequency_based"   # spectral energy shift (short-time FFT)
+    cmi_threshold    = "cmi_threshold"     # MVG Gaussian + CMI signal + quantile threshold (fallback)
+    learned_cmi      = "learned_cmi"       # MVG Gaussian + learned boundary scorer (main v2 method)
 
 
 class PatcherArgs(BaseModel):
-    """Configuration arguments for the Patcher"""
+    model_config = {"arbitrary_types_allowed": True}
+
     patching_mode: PatchingModeEnum = PatchingModeEnum.entropy
     dataset_name: str | None = None
     patching_device: str = "cuda"
     entropy_model_checkpoint_dir: str | None = None
     realtime_patching: bool = True
-    threshold: float = 1.335442066192627
-    threshold_add: float | None = None
+
+    quantile_threshold: float | None = None
     max_patch_length: int | None = None
     patch_size: float = 4.5
     patching_batch_size: int = 512
     device: str = "cuda"
     monotonicity: bool = False
     log_time: bool = False
+    variance_window: int = 4      # half-window for variance_cp method
+    freq_window: int = 16         # window length for frequency_based FFT
+    empirical_bins: int = 16      # histogram bins for empirical_entropy
+
+    # For cmi_threshold mode: pretrained MultivariateGaussianModel instance
+    mvg_model: object | None = None
 
     def build(self) -> "Patcher":
-        """Build and return a Patcher instance"""
         return Patcher(self)
 
 
-def load_entropy_model(
-        entropy_model_checkpoint_dir, state_dict_path, device="cpu"):
-    with open(os.path.join(entropy_model_checkpoint_dir, "params.json")) as fr:
-        reloaded = json.loads(fr.read())
-    # print(reloaded)
-    torch.set_default_dtype(torch.bfloat16)
-    model_params = reloaded["entropy_model"]
-    logger.warning(
-        "Update checkpoint to load attn and sliding window args from checkpoint"
-    )
-    # print("Loading entropy model with params:", model_params)
-    entropy_model_args = GPTConfig(
-        n_layer=model_params["n_layer"],
-        n_head=model_params["n_head"],
-        n_embd=model_params["n_embd"],
-        dropout=model_params["dropout"],
-        bias=model_params["bias"],
-        vocab_size=model_params["vocab_size"],
-        block_size=model_params["block_size"]
-    )
-    entropy_model = GPT(entropy_model_args)
+# ============================================================
+# Entropy Model Loader
+# ============================================================
 
-    entropy_model.load_state_dict(torch.load(
-        state_dict_path, 
-        map_location=device, 
-        weights_only=True
-        )["model_state_dict"], strict=True)
-    
-    entropy_model.to(device)
-    entropy_model = entropy_model.eval()
-    # no grads for the model:
-    for param in entropy_model.parameters():
-        param.requires_grad = False
-    return entropy_model, entropy_model_args
-
-
-def entropy(scores):
+def compute_cmi_signal(model, x: torch.Tensor) -> torch.Tensor:
     """
-    Compute entropy for each token in the batch.
-    
+    Compute the CMI (Covariance Matrix Information) boundary signal from a
+    pretrained MultivariateGaussianModel.
+
     Args:
-        scores: Tensor of shape [bs, seq_len, vocab]
-        
+        model: MultivariateGaussianModel instance (eval, no_grad).
+        x:     (B, L, C) raw real-valued multivariate time series.
+
     Returns:
-        Tensor of shape [bs, seq_len] containing entropy values
-        
-    Note: Uses natural logarithm
+        cmi: (B, L) signal — |Delta log|Sigma_t||, zero at t=0.
     """
+    from models.MultivariateGaussianModel import MultivariateGaussianModel
+    with torch.no_grad():
+        mu, cov = model(x)
+        log_det = MultivariateGaussianModel.log_det(cov)
+        return MultivariateGaussianModel.cmi_signal(log_det)
+
+
+def load_entropy_model(checkpoint_dir, state_path, device="cpu"):
+    """Load pretrained GPT entropy model."""
+    with open(os.path.join(checkpoint_dir, "params.json")) as fr:
+        params = json.loads(fr.read())["entropy_model"]
+    entropy_args = GPTConfig(
+        n_layer=params["n_layer"],
+        n_head=params["n_head"],
+        n_embd=params["n_embd"],
+        dropout=params["dropout"],
+        bias=params["bias"],
+        vocab_size=params["vocab_size"],
+        block_size=params["block_size"],
+    )
+
+    # Construct in bfloat16 (this model is meant to run frozen, in bf16), but
+    # restore the prior global default dtype immediately after -- leaving the
+    # process-wide default mutated silently affects the dtype of every
+    # nn.Module constructed afterward, including unrelated ones (e.g. the
+    # downstream backbone's own trainable head), not just this frozen model.
+    prior_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.bfloat16)
+    try:
+        model = GPT(entropy_args)
+    finally:
+        torch.set_default_dtype(prior_default_dtype)
+
+    model.load_state_dict(
+        torch.load(state_path, map_location=device, weights_only=True)["model_state_dict"],
+        strict=True
+    )
+
+    model = model.to(device).eval()
+
+    for p in model.parameters():
+        p.requires_grad = False
+
+    return model, entropy_args
+
+
+# ============================================================
+# Entropy Computation
+# ============================================================
+
+def entropy(scores: torch.Tensor) -> torch.Tensor:
+    """Compute token entropy from logits [bs, seq, vocab]."""
     log_probs = F.log_softmax(scores, dim=-1)
-    probs = torch.exp(log_probs)
-    p_log_p = log_probs * probs
-    return -p_log_p.sum(dim=-1)
+    probs = log_probs.exp()
+    return -(log_probs * probs).sum(dim=-1)
 
 
 def calculate_entropies(
@@ -109,464 +163,609 @@ def calculate_entropies(
     device: str | None = None,
     enable_grad: bool = False,
 ):
-    """
-    Calculate entropies for all tokens in batched manner.
-    
-    Args:
-        tokens: 2D tensor of shape [batch_size, seq_len]
-        entropy_model: Model to compute entropy predictions
-        patching_batch_size: Batch size for processing
-        device: Device to run model on ('cuda' or 'cpu')
-        enable_grad: Whether to enable gradients
-        
-    Returns:
-        Tuple of (entropies, predictions) both reshaped to match input tokens
-    """
-    grad_context = nullcontext() if enable_grad else torch.no_grad()
-    
-    with grad_context:
-        entropies = []
-        preds = []
-        max_length = getattr(entropy_model, "max_length", 96)
-        batch_numel = max_length * patching_batch_size
-        
-        # Split tokens into manageable chunks
-        splits = torch.split(tokens.flatten(), batch_numel)
-        
-        for split in splits:
-            # Pad to max_length
-            pad_size = (max_length - (split.numel() % max_length)) % max_length
-            if pad_size > 0:
-                pad = torch.zeros(
-                    pad_size, 
-                    dtype=split.dtype, 
-                    device=split.device, 
-                    requires_grad=False
-                )
-                split = torch.cat((split, pad), dim=0)
-            
-            split = split.reshape(-1, max_length)
-            
-            if device is not None:
-                split = split.to(device)
-            
-            # Get predictions from entropy model
-            pred, _ = entropy_model(split)
-            pred = pred.reshape(-1, pred.shape[-1])[:split.numel() - pad_size, :]
-            preds.append(pred)
-            
-            # Calculate entropy
-            pred_entropies = entropy(pred)
-            entropies.append(pred_entropies)
-        
-        # Concatenate and reshape to original token shape
-        concat_entropies = torch.cat(entropies, dim=0).reshape(tokens.shape)
-        concat_preds = torch.cat(preds, dim=0).reshape(tokens.shape[0], -1)
-    
-    return concat_entropies, concat_preds
+    """Compute entropy + predictions in batches.
 
+    Each row (one sample/channel) is right-padded independently to a
+    multiple of the entropy model's own block_size *before* flattening,
+    so a causal window never spans two different rows. Previously the
+    whole (rows, seq_len) tensor was flattened first and rechunked
+    afterwards at a hardcoded width of 96 (the `max_length` attribute
+    read here was never actually set on the model, so it always fell
+    back to 96 regardless of the checkpoint) -- that silently mixed
+    different samples/channels whenever seq_len % 96 != 0, and crashed
+    outright for any checkpoint trained with block_size < 96.
+    """
+    grad_ctx = nullcontext() if enable_grad else torch.no_grad()
+
+    with grad_ctx:
+        R, L = tokens.shape
+        max_len = entropy_model.config.block_size
+
+        chunks_per_row = math.ceil(L / max_len)
+        L_padded = chunks_per_row * max_len
+        row_pad_len = L_padded - L
+
+        if row_pad_len:
+            row_pad = torch.zeros((R, row_pad_len), dtype=tokens.dtype, device=tokens.device)
+            tokens_padded = torch.cat([tokens, row_pad], dim=1)
+        else:
+            tokens_padded = tokens
+
+        # (R, L_padded) -> (R * chunks_per_row, max_len); each row's own
+        # padding (if any) only ever lands at the end of that row's own
+        # last chunk, never mixed with the next row's data.
+        flat = tokens_padded.reshape(R * chunks_per_row, max_len)
+
+        entropies, preds = [], []
+        for split in torch.split(flat, patching_batch_size):
+            if device:
+                split = split.to(device)
+
+            with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                pred, _ = entropy_model(split)
+
+            preds.append(pred)
+            entropies.append(entropy(pred))
+
+        entropies = torch.cat(entropies, dim=0).view(R, L_padded)[:, :L]
+        preds = torch.cat(preds, dim=0).view(R, L_padded, -1)[:, :L, :].reshape(R, -1)
+
+    return entropies, preds
+
+
+# ============================================================
+# Entropy-Based Patch Mask Logic
+# ============================================================
 
 def patch_start_mask_from_entropy_with_monotonicity(entropies, threshold):
-    """
-    Create patch start mask using monotonicity constraint.
-    
-    A new patch starts when the difference in entropy exceeds the threshold.
-    
-    Args:
-        entropies: Tensor of shape [bs, seq_len]
-        threshold: Threshold value
-        
-    Returns:
-        Boolean mask of shape [bs, seq_len] indicating patch starts
-    """
+    """Start new patch when entropy increases > threshold."""
     bs, seq_len = entropies.shape
-    
-    if seq_len == 0:
-        return entropies > threshold
-    
-    mask = torch.zeros_like(entropies, dtype=torch.bool)
-    mask[:, 0] = True  # First token always starts a patch
-    
-    # Calculate differences between consecutive elements
-    differences = entropies[:, 1:] - entropies[:, :-1]
-    
-    # New patch when difference exceeds threshold
-    condition = differences > threshold
-    mask[:, 1:] = condition
-    
-    return mask
-
-
-def patch_start_mask_global_and_monotonicity(entropies, threshold, threshold_add=0):
-    """
-    Create patch start mask using both global and monotonicity constraints.
-    
-    Args:
-        entropies: Tensor of shape [bs, seq_len]
-        threshold: Global threshold for entropy value
-        threshold_add: Additional threshold for entropy difference
-        
-    Returns:
-        Boolean mask of shape [bs, seq_len] indicating patch starts
-    """
-    bs, seq_len = entropies.shape
-    
-    if seq_len == 0:
-        return entropies > threshold
-    
     mask = torch.zeros_like(entropies, dtype=torch.bool)
     mask[:, 0] = True
-    
-    # Calculate differences
-    differences = entropies[:, 1:] - entropies[:, :-1]
-    
-    # New patch when: difference > threshold_add AND entropy > threshold AND previous is not start
-    condition = (differences > threshold_add) & (entropies[:, 1:] > threshold) & (~mask[:, :-1])
-    mask[:, 1:] = condition
-    
+
+    if seq_len > 1:
+        diffs = entropies[:, 1:] - entropies[:, :-1]
+        mask[:, 1:] = diffs > threshold
+
     return mask
 
 
-def patch_start_ids_from_patch_start_mask(patch_start_mask):
+def patch_start_mask_from_entropy_with_monotonicity_adaptive(entropies, threshold):
+    """Same as above, but threshold is per-sample."""
+    bs, seq_len = entropies.shape
+    mask = torch.zeros_like(entropies, dtype=torch.bool)
+    mask[:, 0] = True
+
+    if seq_len > 1:
+        diffs = entropies[:, 1:] - entropies[:, :-1]
+        mask[:, 1:] = diffs > threshold.unsqueeze(1)
+
+    return mask
+
+
+# ============================================================
+# Alternative Boundary Detection Methods
+# ============================================================
+
+def patch_start_mask_from_local_diff(tokens: torch.Tensor,
+                                     quantile_threshold: float) -> torch.Tensor:
     """
-    Convert boolean patch start mask to patch start IDs.
-    
-    Args:
-        patch_start_mask: Boolean tensor of shape [bs, seq_len]
-        
-    Returns:
-        Tensor of shape [bs, max_patches] with patch start positions
+    LocalDiff: boundaries at positions where |token[t] - token[t-1]|
+    exceeds the quantile_threshold-th quantile of all differences.
+    Returns boolean mask (bs, seq_len).
     """
-    bs, trunc_seq_len = patch_start_mask.shape
-    max_patches = patch_start_mask.sum(dim=1).max()
-    
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    diffs = torch.abs(tokens_f[:, 1:] - tokens_f[:, :-1])   # (bs, seq_len-1)
+
+    # Clamp to [0,1] to avoid quantile issues with uniform sequences
+    if diffs.numel() > 0 and diffs.max() > 0:
+        threshold = torch.quantile(diffs, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = torch.zeros(bs, seq_len, dtype=torch.bool, device=tokens.device)
+    mask[:, 0] = True
+    mask[:, 1:] = diffs > threshold
+    return mask
+
+
+def patch_start_mask_from_variance_cp(tokens: torch.Tensor,
+                                       window: int,
+                                       quantile_threshold: float) -> torch.Tensor:
+    """
+    VarianceCP: sliding window variance change-point detection.
+    For each position t, compare variance of left vs right windows.
+    Boundaries where the ratio is high (high variance contrast).
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    eps = 1e-6
+    window = max(2, min(window, seq_len // 4))  # safety clamp
+
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+
+    # Use unfold for efficiency
+    # left window: tokens_f[:, t-window:t], right: tokens_f[:, t:t+window]
+    if seq_len > 2 * window:
+        # Unfold into windows: shape (bs, num_positions, window)
+        left_windows = tokens_f.unfold(1, window, 1)   # (bs, seq_len-window+1, window)
+        right_windows = tokens_f.unfold(1, window, 1)
+
+        left_var  = left_windows.var(dim=2)   # (bs, seq_len-window+1)
+        right_var = right_windows.var(dim=2)
+
+        # Align: for position t, left covers [t-window, t), right covers [t, t+window)
+        # left_var[t] = var of tokens[t:t+window], right_var[t+window] = var of tokens[t+window:t+2*window]
+        # So boundary score at position t+window = max/min ratio
+        n_pos = left_windows.shape[1] - window
+        if n_pos > 0:
+            lv = left_var[:, :n_pos]
+            rv = right_var[:, window:window + n_pos]
+            ratio = (torch.max(lv, rv) / (torch.min(lv, rv) + eps)).float()
+            scores[:, window: window + n_pos] = ratio
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = torch.zeros(bs, seq_len, dtype=torch.bool, device=tokens.device)
+    mask[:, 0] = True
+    mask[:, 1:] = scores[:, 1:] > threshold
+    return mask
+
+
+def patch_start_mask_from_cusum(tokens: torch.Tensor,
+                                 quantile_threshold: float) -> torch.Tensor:
+    """
+    CUSUM: cumulative sum of (token - mean).
+    Large absolute CUSUM values indicate regime change points.
+    Returns boolean mask (bs, seq_len).
+    """
+    tokens_f = tokens.float()
+    mean = tokens_f.mean(dim=1, keepdim=True)
+    deviations = tokens_f - mean
+    cusum = torch.cumsum(deviations, dim=1)
+    scores = torch.abs(cusum)
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(tokens.shape[0], 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_from_empirical_entropy(tokens: torch.Tensor,
+                                              window: int,
+                                              quantile_threshold: float,
+                                              n_bins: int = 16) -> torch.Tensor:
+    """
+    EAPformer-style empirical Shannon entropy boundary detection.
+    For each position t, compute the Shannon entropy of the empirical value
+    distribution within a sliding window of length `window` centred at t.
+    Boundaries are placed where this entropy is HIGH (value distribution is
+    more spread out / more uncertain), which is EAPformer's Eq. 4 concept.
+
+    Key difference from EntroPE: this measures *within-window distributional spread*
+    (statistical entropy), whereas EntroPE measures *predictive uncertainty* of the
+    next token given causal history (conditional entropy from a learned model).
+
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    half_w = max(1, window // 2)
+    eps = 1e-8
+
+    # Compute empirical Shannon entropy for each position using sliding window
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+
+    # Use torch.unfold to create overlapping windows
+    # Pad to keep output length == seq_len
+    padded = torch.nn.functional.pad(tokens_f, (half_w, half_w), mode='replicate')
+    # Shape: (bs, seq_len, window)
+    windows = padded.unfold(1, window, 1)[:, :seq_len, :]
+
+    # Compute histogram-based entropy for each window
+    # Normalise token values to [0, n_bins)
+    tok_min = tokens_f.min(dim=1, keepdim=True)[0]
+    tok_max = tokens_f.max(dim=1, keepdim=True)[0]
+    tok_range = (tok_max - tok_min).clamp(min=eps)
+
+    for b in range(bs):
+        win_b = windows[b]  # (seq_len, window)
+        # Normalise windows to [0, n_bins)
+        normed = ((win_b - tok_min[b]) / tok_range[b] * (n_bins - 1)).clamp(0, n_bins - 1)
+        normed_int = normed.long()  # (seq_len, window)
+
+        for t in range(seq_len):
+            counts = torch.bincount(normed_int[t], minlength=n_bins).float()
+            p = counts / counts.sum()
+            p = p[p > 0]
+            scores[b, t] = -(p * p.log()).sum()
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_from_frequency(tokens: torch.Tensor,
+                                     window: int,
+                                     quantile_threshold: float) -> torch.Tensor:
+    """
+    Frequency-based boundary detection: boundaries at positions where the
+    dominant spectral content shifts between adjacent short-time windows.
+    Uses the L2 distance between consecutive window FFT magnitude spectra.
+
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    tokens_f = tokens.float()
+    half_w = max(1, window // 2)
+
+    # Pad and create overlapping windows (bs, seq_len, window)
+    padded = torch.nn.functional.pad(tokens_f, (half_w, half_w), mode='replicate')
+    windows = padded.unfold(1, window, 1)[:, :seq_len, :]  # (bs, seq_len, window)
+
+    # Apply Hann window to reduce spectral leakage
+    hann = torch.hann_window(window, device=tokens.device)
+    windows = windows * hann.unsqueeze(0).unsqueeze(0)
+
+    # Compute FFT magnitude spectra: (bs, seq_len, window//2+1)
+    spectra = torch.fft.rfft(windows, dim=-1).abs()
+    # Normalise each spectrum
+    spec_norm = spectra / (spectra.sum(dim=-1, keepdim=True) + 1e-8)
+
+    # Spectral shift score = L2 distance between adjacent spectra
+    scores = torch.zeros(bs, seq_len, dtype=torch.float32, device=tokens.device)
+    if seq_len > 1:
+        diff = (spec_norm[:, 1:, :] - spec_norm[:, :-1, :]).pow(2).sum(dim=-1).sqrt()
+        scores[:, 1:] = diff
+
+    if scores.max() > 0:
+        threshold = torch.quantile(scores, quantile_threshold, dim=1, keepdim=True)
+    else:
+        threshold = torch.zeros(bs, 1, device=tokens.device)
+
+    mask = scores > threshold
+    mask[:, 0] = True
+    return mask
+
+
+def patch_start_mask_random(tokens: torch.Tensor,
+                             avg_patch_size: float) -> torch.Tensor:
+    """
+    Random: random boundary placement with same average boundary count
+    as entropy-based method (expected 1 boundary per avg_patch_size tokens).
+    Returns boolean mask (bs, seq_len).
+    """
+    bs, seq_len = tokens.shape
+    p_boundary = 1.0 / max(avg_patch_size, 1.0)
+    rand = torch.rand(bs, seq_len, device=tokens.device)
+    mask = rand < p_boundary
+    mask[:, 0] = True  # first position is always a patch start
+    return mask
+
+
+# ============================================================
+# Patch ID & Length Conversion
+# ============================================================
+
+def patch_start_ids_from_patch_start_mask(mask):
+    """Convert boolean mask → patch start index tensor."""
+    bs, seq_len = mask.shape
+    max_patches = mask.sum(dim=1).max()
+
     if max_patches == 0:
-        return torch.full(
-            (bs, trunc_seq_len),
-            trunc_seq_len,
-            dtype=torch.long,
-            device=patch_start_mask.device,
-        )
-    
-    # Create position indices
-    patch_ids = torch.arange(trunc_seq_len, device=patch_start_mask.device).unsqueeze(0).repeat(bs, 1)
-    
-    # Padding for extraction
-    extra_patch_ids = torch.full(
-        (bs, trunc_seq_len),
-        trunc_seq_len,
-        dtype=torch.long,
-        device=patch_start_mask.device,
-    )
-    
-    all_patch_ids = torch.cat((patch_ids, extra_patch_ids), dim=1)
-    patch_start_mask_padded = torch.cat((patch_start_mask, ~patch_start_mask), dim=1)
-    
-    patch_start_ids = all_patch_ids[patch_start_mask_padded].reshape(bs, trunc_seq_len)[:, :max_patches]
-    
-    return patch_start_ids
+        return torch.full((bs, seq_len), seq_len, dtype=torch.long, device=mask.device)
+
+    positions = torch.arange(seq_len, device=mask.device).repeat(bs, 1)
+    pad = torch.full((bs, seq_len), seq_len, dtype=torch.long, device=mask.device)
+
+    positions = torch.cat([positions, pad], dim=1)
+    mask = torch.cat([mask, ~mask], dim=1)
+
+    return positions[mask].view(bs, seq_len)[:, :max_patches]
 
 
-def check_non_zero_after_zero(tensor):
-    """Check if there are non-zero values after zero values in each row"""
-    zero_mask = tensor == 0
-    shifted_mask = torch.cat([
-        torch.zeros(tensor.shape[0], 1, dtype=torch.bool, device=tensor.device),
-        zero_mask[:, :-1],
-    ], dim=1)
-    non_zero_after_zero = (tensor != 0) & shifted_mask
-    return non_zero_after_zero.any()
+def patch_lengths_from_start_ids(start_ids, seq_len):
+    """Convert patch start indices → patch lengths."""
+    last = torch.full_like(start_ids[:, :1], seq_len - 1)
+    ends = torch.cat([start_ids[:, 1:] - 1, last], dim=1)
+
+    lengths = ends - start_ids + 1
+
+    assert torch.all(lengths >= 0)
+    return lengths
 
 
-def patch_lengths_from_start_ids(patch_start_ids, seq_len):
-    """
-    Calculate patch lengths from start IDs.
-    
-    Args:
-        patch_start_ids: Tensor with patch start positions, e.g., [0, 1, 7, 7, 7, 7, 7]
-        seq_len: Length of the sequence
-        
-    Returns:
-        Patch lengths, e.g., [1, 6] for the example above
-    """
-    last_ids = torch.full_like(patch_start_ids[:, :1], seq_len - 1)
-    patch_end_ids = torch.cat((patch_start_ids[:, 1:] - 1, last_ids), dim=1)
-    patch_lengths = patch_end_ids - patch_start_ids + 1
-    
-    assert torch.all(patch_lengths >= 0), f"Negative patch lengths: {patch_lengths}"
-    assert not check_non_zero_after_zero(patch_lengths), f"Invalid patch lengths: {patch_lengths}"
-    
-    return patch_lengths
-
+# ============================================================
+# Entropy Patch Finder
+# ============================================================
 
 def find_entropy_patch_start_ids(
     entropies,
     patch_size=None,
-    threshold=None,
-    threshold_add=None,
     monotonicity=False,
     include_next_token=True,
+    quantile_threshold=None,
 ):
-    """
-    Find patch start IDs using entropy values.
-    
-    Args:
-        entropies: Entropy values for each token
-        patch_size: Static patch size (if threshold is None)
-        threshold: Entropy threshold for dynamic patching
-        threshold_add: Additional threshold for monotonicity mode
-        monotonicity: Whether to use monotonicity constraint
-        include_next_token: Whether to include next token in calculations
-        
-    Returns:
-        Tensor of patch start IDs
-    """
-    bs, seq_len = entropies.shape[:2]
-    
-    # First token always starts a patch
-    first_ids = torch.tensor([0], dtype=torch.long, device=entropies.device).unsqueeze(0).repeat(bs, 1)
-    preds_truncation_len = first_ids.shape[1]
-    
-    if threshold is None:
-        # Static patching: use top-k entropies
+    """Compute patch start positions from entropy."""
+    bs, seq_len = entropies.shape
+
+    first = torch.zeros((bs, 1), dtype=torch.long, device=entropies.device)
+
+    # Static top-k patching
+    if quantile_threshold is None:
         num_patches = seq_len // patch_size
-        patch_start_ids = entropies.topk(int(num_patches) - 2, dim=1).indices
-        patch_start_ids = patch_start_ids.sort(dim=1).values
+        starts = entropies.topk(int(num_patches) - 2, dim=1).indices
+        starts = starts.sort(dim=1).values
+
+    # Quantile-based adaptive patching
     else:
-        # Dynamic patching based on threshold
+        ent = entropies.float()
+
         if monotonicity:
-            patch_start_mask = patch_start_mask_from_entropy_with_monotonicity(entropies, threshold)
-        elif threshold_add is not None and threshold is not None:
-            patch_start_mask = patch_start_mask_global_and_monotonicity(entropies, threshold, threshold_add)
+            diffs = ent[:, 1:] - ent[:, :-1]
+            threshold = torch.quantile(diffs, quantile_threshold, dim=1)
+            mask = patch_start_mask_from_entropy_with_monotonicity_adaptive(entropies, threshold)
         else:
-            patch_start_mask = entropies > threshold
-        
+            threshold = torch.quantile(ent, quantile_threshold, dim=1)
+            mask = entropies > threshold.unsqueeze(1)
+
         if not include_next_token:
-            patch_start_mask = patch_start_mask[:, :-1]
-        
-        patch_start_ids = patch_start_ids_from_patch_start_mask(patch_start_mask)
-    
-    patch_start_ids = torch.cat((first_ids, patch_start_ids + preds_truncation_len), dim=1)
-    return patch_start_ids
+            mask = mask[:, :-1]
+
+        starts = patch_start_ids_from_patch_start_mask(mask)
+
+    return torch.cat([first, starts + 1], dim=1)
+
+
+# ============================================================
+# Utility Helpers
+# ============================================================
+
+def split_large_numbers(lst, m):
+    out = []
+    for v in lst:
+        while v > m:
+            out.append(m)
+            v -= m
+        out.append(v)
+    return out
 
 
 def rightpad(seq, pad_id, max_len):
-    """Right-pad a sequence to max_len"""
     return seq + [pad_id] * (max_len - len(seq))
 
 
-def split_large_numbers(lst, m):
-    """Split numbers larger than m into multiple chunks of size m"""
-    new_lst = []
-    for i in lst:
-        if i > m:
-            while i > m:
-                new_lst.append(m)
-                i -= m
-            new_lst.append(i)
-        else:
-            new_lst.append(i)
-    
-    assert sum(new_lst) == sum(lst), f"Sum mismatch: {sum(new_lst)} != {sum(lst)}"
-    return new_lst
-
+# ============================================================
+# Main Patcher Class
+# ============================================================
 
 class Patcher:
-    """
-    Patcher for dynamically segmenting token sequences into patches.
-    
-    Supports both static and entropy-based dynamic patching strategies.
-    """
-    
-    def __init__(self, patcher_args: PatcherArgs):
-        self.patcher_args = patcher_args
-        self.patching_mode = patcher_args.patching_mode
-        self.realtime_patching = patcher_args.realtime_patching
-        
-        # Entropy model configuration
-        self.entropy_model_checkpoint_dir = patcher_args.entropy_model_checkpoint_dir
-        self.dataset_name = patcher_args.dataset_name
-        self.state_path = os.path.join(
-            patcher_args.entropy_model_checkpoint_dir, 
-            f"{patcher_args.dataset_name}.pt"
-        )
-        
-        # Device-specific entropy model cache
-        self._entropy_models = {}
-        
-        # Load base entropy model once
-        self._base_entropy_model, _ = load_entropy_model(
-            self.entropy_model_checkpoint_dir,
-            self.state_path,
-        )
-        
-        # Patching parameters
-        self.threshold = patcher_args.threshold
-        self.threshold_add = patcher_args.threshold_add
-        self.max_patch_length = patcher_args.max_patch_length
-        self.patch_size = patcher_args.patch_size
-        self.patching_batch_size = patcher_args.patching_batch_size
-        self.device = patcher_args.device
-        self.monotonicity = patcher_args.monotonicity
-        
-        # Time logging
-        self.log_time = patcher_args.log_time
+    """Dynamic patcher supporting multiple boundary detection strategies."""
+
+    def __init__(self, args: PatcherArgs):
+        self.args = args
+        self.patching_mode = args.patching_mode
+        self.monotonicity = args.monotonicity
+        self.quantile_threshold = args.quantile_threshold
+        self.max_patch_length = args.max_patch_length
+        self.patch_size = args.patch_size
+        self.batch_size = args.patching_batch_size
+        self.device = args.device
+        self.log_time = args.log_time
+        self.variance_window = args.variance_window
+        self.freq_window = args.freq_window
+        self.empirical_bins = args.empirical_bins
+
         if self.log_time:
             self.log = defaultdict(float)
-    
-    def _get_entropy_model_for_device(self, device):
-        """
-        Get or create entropy model for specific device.
-        
-        Uses caching to avoid recreating models for the same device.
-        """
-        device_str = str(device)
-        
-        if device_str not in self._entropy_models:
-            try:
-                import copy
-                entropy_model = copy.deepcopy(self._base_entropy_model)
-                entropy_model = entropy_model.to(device)
-                entropy_model.eval()
-                
-                # Disable gradients for inference
-                for param in entropy_model.parameters():
-                    param.requires_grad = False
-                
-                self._entropy_models[device_str] = entropy_model
-            except Exception as e:
-                print(f"Warning: Could not create entropy model for device {device}: {e}")
-                # Fallback to base model
-                return self._base_entropy_model
-        
-        return self._entropy_models[device_str]
-    
-    def patch(
-        self,
-        tokens: torch.Tensor,
-        include_next_token: bool = False,
-        preds: torch.Tensor | None = None,
-        entropies: torch.Tensor | None = None,
-        threshold: float = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """
-        Patch a sequence of tokens.
-        
-        Args:
-            tokens: 2D tensor of shape [batch_size, seq_len]
-            include_next_token: Whether to include next token in patch calculations
-            preds: Pre-computed predictions (optional)
-            entropies: Pre-computed entropies (optional)
-            threshold: Override threshold value (optional)
-            
-        Returns:
-            Tuple of (patch_lengths, scores) where:
-                - patch_lengths: Tensor of shape [batch_size, max_num_patches]
-                - scores: Entropy or other scores (or None for static patching)
-        """
-        bs, seq_len = tokens.shape
-        seq_len_next_tok = seq_len + 1 if include_next_token else seq_len
-        scores = None
-        
-        # STATIC PATCHING
-        if self.patching_mode == PatchingModeEnum.static:
-            num_patches = math.ceil(seq_len_next_tok / self.patch_size)
-            patch_lengths = torch.zeros(
-                (bs, num_patches),
-                dtype=tokens.dtype,
-                device=tokens.device,
-            ).fill_(self.patch_size)
-            
-            # Adjust last patch if sequence doesn't divide evenly
-            if seq_len_next_tok % self.patch_size != 0:
-                patch_lengths[:, -1] = seq_len_next_tok % self.patch_size
-        
-        # ENTROPY-BASED DYNAMIC PATCHING
-        elif self.patching_mode == PatchingModeEnum.entropy:
-            if self.log_time:
-                start_time = time.time()
-            
-            # Get or compute entropies
-            if entropies is not None:
-                scores = entropies.to(dtype=torch.float32)
-            elif preds is not None:
-                scores = entropy(preds)
-            else:
-                scores, _ = calculate_entropies(
-                    tokens,
-                    self._get_entropy_model_for_device(tokens.device),
-                    self.patching_batch_size,
-                    tokens.device,
-                )
-            
-            if self.log_time:
-                self.log["calculate_entropies"] += time.time() - start_time
-                start_time = time.time()
-            
-            # Find patch start positions
-            patch_start_ids = find_entropy_patch_start_ids(
-                scores,
-                self.patch_size,
-                include_next_token=include_next_token,
-                threshold=threshold if threshold is not None else self.threshold,
-                threshold_add=self.threshold_add,
-                monotonicity=self.monotonicity,
+
+        # MVG model for cmi_threshold mode
+        self._mvg_model = getattr(args, 'mvg_model', None)
+
+        # Only load the entropy model when needed
+        self._entropy_models = {}
+        self._base_entropy_model = None
+
+        if self.patching_mode == PatchingModeEnum.entropy:
+            self.state_path = os.path.join(
+                args.entropy_model_checkpoint_dir,
+                f"{args.dataset_name}.pt"
             )
-            
-            if self.log_time:
-                self.log["find_entropy_patch_start_ids"] += time.time() - start_time
-                start_time = time.time()
-            
-            # Convert start IDs to lengths
-            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_next_tok)
-            
-            if self.log_time:
-                self.log["patch_lengths_from_start_ids"] += time.time() - start_time
-                start_time = time.time()
-        
-        # Post-processing: split patches that exceed max length
+            self._base_entropy_model, _ = load_entropy_model(
+                args.entropy_model_checkpoint_dir,
+                self.state_path,
+            )
+        else:
+            self.state_path = None
+
+    # ---------------------------------------
+    # Entropy model device cache
+    # ---------------------------------------
+
+    def _get_entropy_model_for_device(self, device):
+        key = str(device)
+
+        if key not in self._entropy_models:
+            import copy
+            model = copy.deepcopy(self._base_entropy_model).to(device).eval()
+            for p in model.parameters():
+                p.requires_grad = False
+            self._entropy_models[key] = model
+
+        return self._entropy_models[key]
+
+    # ---------------------------------------
+    # Postprocess patch lengths (shared logic)
+    # ---------------------------------------
+
+    def _postprocess_patch_lengths(self, patch_lengths, tokens, include_next_token):
+        """Apply max_patch_length splitting and assert correctness."""
+        bs = tokens.shape[0]
+
         if self.max_patch_length is not None:
             patch_lengths = [
                 split_large_numbers(pl, self.max_patch_length)
                 for pl in patch_lengths.tolist()
             ]
             max_len = max(len(pl) for pl in patch_lengths)
-            patch_lengths = [rightpad(pl, 0, max_len=max_len) for pl in patch_lengths]
             patch_lengths = torch.tensor(
-                patch_lengths, 
-                dtype=tokens.dtype, 
+                [rightpad(pl, 0, max_len) for pl in patch_lengths],
                 device=tokens.device
             )
-        
-        # Validate patch lengths
-        assert not check_non_zero_after_zero(patch_lengths), "Invalid patch lengths structure"
-        
-        # Trim trailing zeros
-        last_non_zero_col = (patch_lengths != 0).flip(dims=[1]).int().argmax(dim=1).min()
-        patch_lengths = patch_lengths[:, :patch_lengths.shape[1] - last_non_zero_col]
-        
-        # Verify total length
-        expected_total = tokens.numel() + include_next_token * tokens.shape[0]
-        actual_total = torch.sum(patch_lengths).item()
-        assert actual_total == expected_total, \
-            f"Patch length sum mismatch: {actual_total} != {expected_total}"
-        
-        if self.log_time:
-            self.log["postprocessing_patch_lengths"] += time.time() - start_time
-            self.log["tokens"] += patch_lengths.sum().item()
-        
-        return patch_lengths, scores
 
+        expected = tokens.numel() + include_next_token * bs
+        assert patch_lengths.sum().item() == expected, (
+            f"patch_lengths sum {patch_lengths.sum().item()} != expected {expected}"
+        )
+        return patch_lengths
+
+    # ---------------------------------------
+    # Main patching entry point
+    # ---------------------------------------
+
+    def patch(self, tokens, include_next_token=False, preds=None, entropies=None):
+        bs, seq_len = tokens.shape
+        seq_len_eff = seq_len + int(include_next_token)
+
+        # ---------- STATIC ----------
+        if self.patching_mode == PatchingModeEnum.static:
+            num_patches = math.ceil(seq_len_eff / self.patch_size)
+            patch_lengths = torch.full((bs, num_patches), self.patch_size, device=tokens.device)
+
+            if seq_len_eff % self.patch_size:
+                patch_lengths[:, -1] = seq_len_eff % self.patch_size
+
+            return patch_lengths, None
+
+        # ---------- LOCAL DIFF ----------
+        elif self.patching_mode == PatchingModeEnum.local_diff:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_local_diff(tokens, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- VARIANCE CP ----------
+        elif self.patching_mode == PatchingModeEnum.variance_cp:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_variance_cp(tokens, self.variance_window, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- CUSUM ----------
+        elif self.patching_mode == PatchingModeEnum.cusum:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_cusum(tokens, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- RANDOM ----------
+        elif self.patching_mode == PatchingModeEnum.random:
+            mask = patch_start_mask_random(tokens, self.patch_size)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- EMPIRICAL ENTROPY (EAPformer-style) ----------
+        elif self.patching_mode == PatchingModeEnum.empirical_entropy:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_empirical_entropy(
+                tokens, self.freq_window, qt, self.empirical_bins
+            )
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- FREQUENCY-BASED ----------
+        elif self.patching_mode == PatchingModeEnum.frequency_based:
+            qt = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            mask = patch_start_mask_from_frequency(tokens, self.freq_window, qt)
+            patch_start_ids = patch_start_ids_from_patch_start_mask(mask)
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), None
+
+        # ---------- CMI THRESHOLD ----------
+        # Multivariate Gaussian CMI signal + quantile threshold (no discrete tokenisation).
+        # tokens here is actually a float tensor (B, L, C) when called from the v2 path.
+        elif self.patching_mode == PatchingModeEnum.cmi_threshold:
+            assert self._mvg_model is not None, (
+                "cmi_threshold mode requires a MultivariateGaussianModel; "
+                "pass mvg_model= to PatcherArgs."
+            )
+            qt  = self.quantile_threshold if self.quantile_threshold is not None else 0.75
+            cmi = compute_cmi_signal(self._mvg_model, tokens)   # (B, L)
+            threshold = torch.quantile(cmi, qt, dim=1, keepdim=True)
+            mask = cmi > threshold
+            mask[:, 0] = True
+            patch_start_ids  = patch_start_ids_from_patch_start_mask(mask)
+            # patch_lengths derived from mask length (B, L) — no include_next_token shift
+            patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+            return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), cmi
+
+        # ---------- LEARNED CMI ----------
+        # End-to-end differentiable; boundary computation lives inside EntroPE_v2.forward.
+        # Calling Patcher.patch() for this mode is a programming error.
+        elif self.patching_mode == PatchingModeEnum.learned_cmi:
+            raise NotImplementedError(
+                "patching_mode='learned_cmi' does not use Patcher.patch(). "
+                "Boundary decisions are computed inside EntroPE_v2.forward() via "
+                "GumbelSigmoidPatcher. Use --patching_mode learned_cmi only with "
+                "--model EntroPE_v2."
+            )
+
+        # ---------- ENTROPY ----------
+        t0 = time.time() if self.log_time else None
+
+        if entropies is not None:
+            scores = entropies.float()
+        elif preds is not None:
+            scores = entropy(preds)
+        else:
+            scores, _ = calculate_entropies(
+                tokens,
+                self._get_entropy_model_for_device(tokens.device),
+                self.batch_size,
+                tokens.device,
+            )
+
+        patch_start_ids = find_entropy_patch_start_ids(
+            scores,
+            self.patch_size,
+            include_next_token=include_next_token,
+            monotonicity=self.monotonicity,
+            quantile_threshold=self.quantile_threshold,
+        )
+
+        patch_lengths = patch_lengths_from_start_ids(patch_start_ids, seq_len_eff)
+
+        return self._postprocess_patch_lengths(patch_lengths, tokens, include_next_token), scores
+
+
+# ============================================================
+# Distributed Helpers
+# ============================================================
 
 @lru_cache()
-def get_is_torch_run() -> bool:
-    """Check if running in distributed torch environment"""
+def get_is_torch_run():
     return os.environ.get("LOCAL_RANK") is not None
 
 
 @lru_cache()
-def get_local_rank() -> int:
-    """Get local rank for distributed training"""
-    if get_is_torch_run():
-        return int(os.environ["LOCAL_RANK"])
-    return 0
+def get_local_rank():
+    return int(os.environ["LOCAL_RANK"]) if get_is_torch_run() else 0

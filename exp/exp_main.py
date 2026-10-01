@@ -14,29 +14,19 @@ import os
 import time
 import warnings
 import matplotlib.pyplot as plt
-import wandb
+# import wandb
 
 warnings.filterwarnings('ignore')
-
-# ============================================
-# WANDB ON/OFF TOGGLE - Set to False to disable wandb
-# ============================================
-USE_WANDB = False
-# ============================================
 
 
 class Exp_Main(Exp_Basic):
     def __init__(self, args):
-        self.use_wandb = USE_WANDB
-        self.wandb_config = self._build_wandb_config(args) if self.use_wandb else None
-        self.wandb_initialized = False
+        # self.wandb_config = self._build_wandb_config(args)
+        # self.wandb_initialized = False
         super(Exp_Main, self).__init__(args)
 
     def _build_wandb_config(self, args):
         """Build wandb configuration from args"""
-        if not self.use_wandb:
-            return None
-            
         config = {
             'model': args.model,
             'seq_len': args.seq_len,
@@ -96,7 +86,7 @@ class Exp_Main(Exp_Basic):
 
     def _build_model(self):
         model_dict = {
-            'EntroPE': EntroPE
+            'EntroPE':    EntroPE,
         }
         model = model_dict[self.args.model].Model(self.args).float()
 
@@ -112,8 +102,8 @@ class Exp_Main(Exp_Basic):
             'trainable_parameters': trainable_params,
         }
         
-        if self.use_wandb and self.wandb_initialized:
-            wandb.config.update(self.model_info)
+        # if self.wandb_initialized:
+        #     wandb.config.update(self.model_info)
         
         return model
 
@@ -133,10 +123,10 @@ class Exp_Main(Exp_Basic):
         """Check if model uses simplified forward pass"""
         return 'Linear' in self.args.model or 'EntroPE' in self.args.model
 
-    def _forward_model(self, batch_x, batch_x_mark, dec_inp, batch_y_mark):
+    def _forward_model(self, batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=None):
         """Forward pass handling both simple and complex models"""
         if self._is_simple_model():
-            return self.model(batch_x)
+            return self.model(batch_x, channel_idx=channel_idx)
         else:
             if self.args.output_attention:
                 return self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
@@ -182,19 +172,18 @@ class Exp_Main(Exp_Basic):
 
     def train(self, setting):
         # Initialize wandb
-        if self.use_wandb:
-            wandb.init(
-                project=f"time-series-forecasting-{self.args.data_path}",
-                name=setting,
-                config=self.wandb_config,
-                reinit=True
-            )
-            self.wandb_initialized = True
-            
-            if hasattr(self, 'model_info'):
-                wandb.config.update(self.model_info)
-            
-            wandb.watch(self.model, log='all', log_freq=100)
+        # wandb.init(
+        #     project=f"time-series-forecasting-{self.args.data_path}",
+        #     name=setting,
+        #     config=self.wandb_config,
+        #     reinit=True
+        # )
+        # self.wandb_initialized = True
+        
+        # if hasattr(self, 'model_info'):
+        #     wandb.config.update(self.model_info)
+        
+        # wandb.watch(self.model, log='all', log_freq=100)
         
         # Get data loaders
         train_data, train_loader = self._get_data(flag='train')
@@ -223,16 +212,15 @@ class Exp_Main(Exp_Basic):
         )
 
         # Log dataset info
-        if self.use_wandb:
-            dataset_info = {
-                'train_samples': len(train_data),
-                'val_samples': len(vali_data),
-                'test_samples': len(test_data),
-                'train_steps_per_epoch': train_steps,
-            }
-            if hasattr(self.args, 'patching_batch_size'):
-                dataset_info['patching_batch_size'] = self.args.patching_batch_size
-            wandb.log(dataset_info)
+        dataset_info = {
+            'train_samples': len(train_data),
+            'val_samples': len(vali_data),
+            'test_samples': len(test_data),
+            'train_steps_per_epoch': train_steps,
+        }
+        if hasattr(self.args, 'patching_batch_size'):
+            dataset_info['patching_batch_size'] = self.args.patching_batch_size
+        # wandb.log(dataset_info)
 
         # Training loop
         time_now = time.time()
@@ -251,6 +239,19 @@ class Exp_Main(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # For very high-channel-count datasets (e.g. Traffic, 862 channels),
+                # channel independence means training doesn't need every channel in
+                # the same batch -- randomly subsample a fixed number of channels per
+                # iteration to bound activation memory. Only applied in training;
+                # vali()/test() always use every real channel for correct metrics.
+                channel_idx = None
+                sample_size = getattr(self.args, 'channel_sample_size', None)
+                n_vars = batch_x.shape[2]
+                if sample_size is not None and sample_size < n_vars:
+                    channel_idx = torch.randperm(n_vars, device=self.device)[:sample_size]
+                    batch_x = batch_x[:, :, channel_idx]
+                    batch_y = batch_y[:, :, channel_idx]
+
                 # Log FLOPs on first batch
                 if epoch == 0 and i == 0:
                     try:
@@ -262,7 +263,7 @@ class Exp_Main(Exp_Basic):
                                 as_strings=True, 
                                 print_per_layer_stat=False
                             )
-                            print(f'Computational complexity: {macs}')
+                            # print(f'Computational complexity: {macs}')
                             print(f'Number of parameters: {params}')
                     except:
                         pass
@@ -274,17 +275,23 @@ class Exp_Main(Exp_Basic):
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=channel_idx)
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
                         batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
                         loss = criterion(outputs, batch_y)
+                        # EntroPE_v2: add auxiliary boundary + MVG losses
+                        if hasattr(self.model, 'auxiliary_losses'):
+                            loss = loss + self.model.auxiliary_losses()
                 else:
-                    outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=channel_idx)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
                     loss = criterion(outputs, batch_y)
+                    # EntroPE_v2: add auxiliary boundary + MVG losses
+                    if hasattr(self.model, 'auxiliary_losses'):
+                        loss = loss + self.model.auxiliary_losses()
 
                 train_loss.append(loss.item())
 
@@ -295,13 +302,12 @@ class Exp_Main(Exp_Basic):
                     left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
                     print(f'\tspeed: {speed:.4f}s/iter; left time: {left_time:.4f}s')
                     
-                    if self.use_wandb:
-                        wandb.log({
-                            'batch_loss': loss.item(),
-                            'learning_rate': model_optim.param_groups[0]['lr'],
-                            'training_speed_s_per_iter': speed,
-                            'estimated_time_left_s': left_time,
-                        }, step=epoch * train_steps + i)
+                    # wandb.log({
+                    #     'batch_loss': loss.item(),
+                    #     'learning_rate': model_optim.param_groups[0]['lr'],
+                    #     'training_speed_s_per_iter': speed,
+                    #     'estimated_time_left_s': left_time,
+                    # }, step=epoch * train_steps + i)
                     
                     iter_count = 0
                     time_now = time.time()
@@ -330,23 +336,21 @@ class Exp_Main(Exp_Basic):
             print(f"Epoch: {epoch + 1}, Steps: {train_steps} | Train Loss: {train_loss:.7f} "
                   f"Vali Loss: {vali_loss:.7f} Test Loss: {test_loss:.7f}")
             
-            if self.use_wandb:
-                wandb.log({
-                    'epoch_train_loss': train_loss,
-                    'epoch_val_loss': vali_loss,
-                    'epoch_test_loss': test_loss,
-                    'epoch_duration': epoch_duration,
-                    'epoch': epoch + 1,
-                })
+            # wandb.log({
+            #     'epoch_train_loss': train_loss,
+            #     'epoch_val_loss': vali_loss,
+            #     'epoch_test_loss': test_loss,
+            #     'epoch_duration': epoch_duration,
+            #     'epoch': epoch + 1,
+            # })
             
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
-                if self.use_wandb:
-                    wandb.log({
-                        'early_stopping_epoch': epoch + 1,
-                        'best_val_loss': early_stopping.val_loss_min,
-                    })
+                # wandb.log({
+                #     'early_stopping_epoch': epoch + 1,
+                #     'best_val_loss': early_stopping.val_loss_min,
+                # })
                 break
 
             if self.args.lradj != 'TST':
@@ -354,37 +358,38 @@ class Exp_Main(Exp_Basic):
 
         best_model_path = os.path.join(path, 'checkpoint.pth')
         self.model.load_state_dict(torch.load(best_model_path))
-        
-        if self.use_wandb:
-            wandb.save(best_model_path)
+        # wandb.save(best_model_path)
         
         return self.model
 
     def test(self, setting, test=0):
-        if self.use_wandb and not self.wandb_initialized:
-            wandb.init(
-                project=f"time-series-forecasting-{self.args.data}",
-                name=f"{setting}_test",
-                config=self.wandb_config,
-                reinit=True
-            )
-            self.wandb_initialized = True
+        # if not self.wandb_initialized:
+        #     # wandb.init(
+        #     #     project=f"time-series-forecasting-{self.args.data}",
+        #     #     name=f"{setting}_test",
+        #     #     config=self.wandb_config,
+        #     #     reinit=True
+        #     # )
+        #     # self.wandb_initialized = True
             
-            if hasattr(self, 'model_info'):
-                wandb.config.update(self.model_info)
+        #     if hasattr(self, 'model_info'):
+        #         wandb.config.update(self.model_info)
         
         test_data, test_loader = self._get_data(flag='test')
         
         if test:
             print('Loading model')
             self.model.load_state_dict(
-                torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'))
+                torch.load(os.path.join(self.args.checkpoints, setting, 'checkpoint.pth'),
+                           map_location=self.device)
             )
 
         preds = []
         trues = []
-        folder_path = './test_results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
+        save_test_artifacts = bool(getattr(self.args, 'save_test_artifacts', 1))
+        if save_test_artifacts:
+            folder_path = './test_results/' + setting + '/'
+            os.makedirs(folder_path, exist_ok=True)
 
         self.model.eval()
         with torch.no_grad():
@@ -416,20 +421,19 @@ class Exp_Main(Exp_Basic):
                 trues.append(batch_y)
                 
                 # Visualize predictions
-                if i % 20 == 0:
+                if save_test_artifacts and i % 20 == 0:
                     input_data = batch_x.detach().cpu().numpy()
                     gt = np.concatenate((input_data[0, :, -1], batch_y[0, :, -1]), axis=0)
                     pd = np.concatenate((input_data[0, :, -1], outputs[0, :, -1]), axis=0)
                     
-                    if self.use_wandb:
-                        fig, ax = plt.subplots(figsize=(12, 6))
-                        ax.plot(gt, label='Ground Truth', alpha=0.8)
-                        ax.plot(pd, label='Prediction', alpha=0.8)
-                        ax.legend()
-                        ax.set_title(f'Prediction vs Ground Truth - Batch {i}')
-                        
-                        wandb.log({f'prediction_plot_batch_{i}': wandb.Image(fig)})
-                        plt.close(fig)
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    ax.plot(gt, label='Ground Truth', alpha=0.8)
+                    ax.plot(pd, label='Prediction', alpha=0.8)
+                    ax.legend()
+                    ax.set_title(f'Prediction vs Ground Truth - Batch {i}')
+                    
+                    # wandb.log({f'prediction_plot_batch_{i}': wandb.Image(fig)})
+                    plt.close(fig)
                     
                     visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
 
@@ -447,65 +451,50 @@ class Exp_Main(Exp_Basic):
         print(f'MSE: {mse}, MAE: {mae}, RSE: {rse}')
         
         # Log test metrics
-        if self.use_wandb:
-            test_metrics = {
-                'test_mse': mse,
-                'test_mae': mae,
-                'test_rmse': rmse,
-                'test_mape': mape,
-                'test_mspe': mspe,
-                'test_rse': rse,
-                'test_correlation_mean': corr_mean,
-            }
-            wandb.log(test_metrics)
-            
-            # Create visualization
-            errors = preds - trues
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-            
-            ax1.hist(errors.flatten(), bins=50, alpha=0.7, edgecolor='black')
-            ax1.set_title('Prediction Error Distribution')
-            ax1.set_xlabel('Error')
-            ax1.set_ylabel('Frequency')
-            
-            sample_size = min(1000, len(preds.flatten()))
-            indices = np.random.choice(len(preds.flatten()), sample_size, replace=False)
-            ax2.scatter(trues.flatten()[indices], preds.flatten()[indices], alpha=0.5)
-            ax2.plot([trues.min(), trues.max()], [trues.min(), trues.max()], 'r--', lw=2)
-            ax2.set_xlabel('Actual')
-            ax2.set_ylabel('Predicted')
-            ax2.set_title('Predicted vs Actual')
-            
-            plt.tight_layout()
-            wandb.log({"error_analysis": wandb.Image(fig)})
-            plt.close(fig)
+        test_metrics = {
+            'test_mse': mse,
+            'test_mae': mae,
+            'test_rmse': rmse,
+            'test_mape': mape,
+            'test_mspe': mspe,
+            'test_rse': rse,
+            'test_correlation_mean': corr_mean,
+        }
+        # wandb.log(test_metrics)
+        
+        # Create visualization
+        errors = preds - trues
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        ax1.hist(errors.flatten(), bins=50, alpha=0.7, edgecolor='black')
+        ax1.set_title('Prediction Error Distribution')
+        ax1.set_xlabel('Error')
+        ax1.set_ylabel('Frequency')
+        
+        sample_size = min(1000, len(preds.flatten()))
+        indices = np.random.choice(len(preds.flatten()), sample_size, replace=False)
+        ax2.scatter(trues.flatten()[indices], preds.flatten()[indices], alpha=0.5)
+        ax2.plot([trues.min(), trues.max()], [trues.min(), trues.max()], 'r--', lw=2)
+        ax2.set_xlabel('Actual')
+        ax2.set_ylabel('Predicted')
+        ax2.set_title('Predicted vs Actual')
+        
+        plt.tight_layout()
+        plt.close(fig)
         
         # Save results
-        folder_path = './results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
-        
         with open("result.txt", 'a') as f:
             f.write(f"{setting}\n")
             f.write(f'MSE: {mse}, MAE: {mae}, RSE: {rse}\n\n')
 
-        np.save(os.path.join(folder_path, 'pred.npy'), preds)
+        if save_test_artifacts:
+            folder_path = './results/' + setting + '/'
+            os.makedirs(folder_path, exist_ok=True)
+            np.save(os.path.join(folder_path, 'pred.npy'), preds)
         
-        if self.use_wandb:
-            wandb.finish()
         return
 
     def predict(self, setting, load=False):
-        if self.use_wandb and not self.wandb_initialized:
-            wandb.init(
-                project=f"time-series-forecasting-{self.args.data}",
-                name=f"{setting}_prediction",
-                config=self.wandb_config,
-                reinit=True
-            )
-            self.wandb_initialized = True
-            
-            if hasattr(self, 'model_info'):
-                wandb.config.update(self.model_info)
         
         pred_data, pred_loader = self._get_data(flag='pred')
 
@@ -538,20 +527,10 @@ class Exp_Main(Exp_Basic):
 
         preds = np.concatenate(preds, axis=0)
 
-        # Log prediction statistics
-        if self.use_wandb:
-            wandb.log({
-                'prediction_mean': float(np.mean(preds)),
-                'prediction_std': float(np.std(preds)),
-                'num_predictions': len(preds),
-            })
-
         # Save results
         folder_path = './results/' + setting + '/'
         os.makedirs(folder_path, exist_ok=True)
         np.save(os.path.join(folder_path, 'real_prediction.npy'), preds)
         
-        if self.use_wandb:
-            wandb.finish()
+        # wandb.finish()
         return
-    

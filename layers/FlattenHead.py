@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class Flatten_Head(nn.Module):
+class FlattenHead(nn.Module):
     """
     Flattening head for converting patch representations to predictions.
     

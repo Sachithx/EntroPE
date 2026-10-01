@@ -1,183 +1,106 @@
-<div align="center">
-<img src="assets/logo.png" alt="Main Architecture" width="300">
-</div>
+# EntroPE: Entropy-Guided Dynamic Patching for Time-Series Forecasting
 
-# Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting
+Reference implementation for the NeurIPS 2026 paper. EntroPE places patch
+boundaries at high-entropy positions using a frozen, pre-trained causal GPT
+entropy model, then forecasts with a patch encoder / global transformer /
+fusion decoder backbone.
 
-This repository contains the official implementation of the paper:
-> **EntroPE: Entropy-Guided Dynamic Patch Encoder for Time Series Forecasting**  
-> *Under review.*
+This repository reproduces the long-term forecasting results on
+**ETTh1, ETTh2, ETTm1, ETTm2, and Weather** (input length `L=96`, horizons
+`{96, 192, 336, 720}`). You can either **evaluate the provided checkpoints**
+(minutes) or **train everything from scratch**.
 
----
-
-## Overview
-
-**EntroPE** introduces entropy-driven dynamic patching for time series Transformers. Instead of fixed-length patches, we use information-theoretic principles to place patch boundaries where predictive uncertainty is highest, creating semantically meaningful temporal segments.
-
-<div align="center">
-<img src="assets/main_architecture.png" alt="Main Architecture" width="600">
-<p><em>EntroPE framework architecture: (A) Entropy-Based Dynamic Patcher calculates entropy to identify boundaries; (B) Adaptive Patch Encoder aggregates patches into fixed-size embeddings; (C) Fusion Decoder combines global and local context for forecasting.</em></p>
-</div>
-
-<div align="center">
-<img src="assets/static_vs_dynamic_patch.png" alt="Static vs Dynamic Patching" width="400">
-<p><em>Static patching (top) vs. our entropy-driven dynamic approach (bottom).</em></p>
-</div>
-
----
-
-## Key Contributions
-
-- **Entropy-Based Dynamic Patcher (EDP)**: Uses conditional entropy to identify temporal transition points and place patch boundaries at positions with high predictive uncertainty
-- **Adaptive Patch Encoder (APE)**: Employs cross-attention mechanisms to encode variable-length patches into fixed-size representations while preserving dependencies
-- **Temporally-Informed Architecture**: Preserves temporal coherence by respecting natural time series structure, addressing train-inference mismatch
-
----
-
-## Installation
+## 1. Setup
 
 ```bash
-# Create environment
-conda create --name entrope python=3.10
+conda create -n entrope python=3.10 -y
 conda activate entrope
 pip install -r requirements.txt
 ```
 
----
+Tested with Python 3.10 and PyTorch 2.x (CUDA 12.x). A single GPU is enough.
 
-## Experiments
+## 2. Data and checkpoints
 
-### Datasets
-We evaluate on 7 benchmark datasets:
-- **ETT family**: ETTh1, ETTh2, ETTm1, ETTm2 (Energy)
-- **Weather**: Meteorological data 
-- **Electricity**: Power consumption
-- **Exchange Rate**: Currency exchange rates
+- **Datasets.** The five standard benchmark CSVs are in `dataset/`
+  (`ETTh1/ETTh2/ETTm1/ETTm2.csv`, `weather.csv`). Each dataset is normalized
+  by a `StandardScaler` fit on its own training split; this is done
+  automatically at load time, so no extra files are needed.
+- **Checkpoints.** Two sets are required and are provided with the release:
+  - `entropy_model_checkpoints/dm16/` — the frozen GPT entropy models
+    (`params.json` + one `<dataset>.pt` per dataset). **These are loaded
+    separately from the forecasting weights and are required even for
+    eval-only.**
+  - `checkpoints/<setting>/checkpoint.pth` — one trained forecasting model per
+    (dataset, horizon) cell.
 
-### Quick Start
+  If you cloned from GitHub (where large files are git-ignored), download the
+  `checkpoints/` and `entropy_model_checkpoints/` folders from the release
+  bucket and place them at the repository root, preserving their layout.
+
+## 3. Reproduce the reported numbers (eval only, no training)
+
 ```bash
-# Run specific dataset
-sh scripts/etth1.sh
+bash scripts/eval_all.sh           # all 5 datasets
+bash scripts/eval_all.sh ETTh1     # one dataset
 ```
 
-### Results Summary
-EntroPE achieves significant improvements over existing methods:
-- **~20% improvement** on ETTh1 compared to PatchTST
-- **~15% improvement** on Electricity dataset
-- **~10% average improvement** across all benchmarks
-- Better computational efficiency through dynamic patching
+This loads each provided checkpoint and prints the test MSE/MAE next to the
+value reported in the paper, e.g.:
 
----
-
-## Configuration
-
-### Model Parameters
-```yaml
-# Core model settings
-learning_rate: 0.001
-batch_size: 64
-train_epochs: 20
-patience: 7
-dropout: 0.1
-
-# Architecture
-dim: 8
-heads: 2
-layers: 1
-multiple_of: 64
-
-# Dynamic patching
-patching_threshold: 0.2
-patching_threshold_add: 0.01
-max_patch_length: 24
-monotonicity: 1
+```
+ETTh1       96  0.3794    0.3961     (paper: 0.3794 / 0.3961)
 ```
 
-### Threshold Selection
-- **threshold_global**: Controls patch granularity (higher = fewer patches)
-- **threshold_relative**: Controls sensitivity to entropy changes
-- Robust across range [0.15, 0.55] for most datasets
+MSE/MAE are computed in the standardized (z-scored) space, following the
+standard long-term-forecasting protocol.
 
----
+## 4. Train from scratch
 
-## Key Features
+**Stage 2 — forecasting (the frozen entropy models are already provided):**
 
-### Dynamic Boundary Detection
-- Information-theoretic approach using conditional entropy
-- Dual-threshold mechanism (global + relative thresholds)
-- Respects temporal causality and predictive difficulty
-
-### Adaptive Encoding
-- Handles variable-length patches efficiently
-- Cross-attention refinement preserves intra-patch dependencies
-- Fixed-size output suitable for transformer processing
-
-### Efficiency Benefits
-- Reduces token count through intelligent boundary placement
-- Maintains computational tractability
-- Scales well with sequence length
-
----
-
-## Reproducibility
-
-All results can be reproduced using:
-- Fixed random seeds (5 different seeds reported)
-- Complete hyperparameter configurations provided
-- Environment specifications included
-
-**Tested Platforms** (single-GPU):
-- NVIDIA RTX 4090
-- NVIDIA RTX A5000  
-- NVIDIA GeForce RTX 4090 D
-- NVIDIA RTX 6000 Ada-16Q
-
-**Evaluation Metrics**: MSE, MAE, MACs (Multiply-Accumulate Operations)
-
----
-
-## License
-
-This project is licensed under the Apache License - see the LICENSE file for details.
-
----
-
-## Acknowledgments
-
-This work builds upon and is inspired by several key contributions in the field:
-
-### Foundational Work
-- **PatchTST**: Our approach is built on the foundation of PatchTST and other patch-based time series transformers, which demonstrated the effectiveness of patch-based architectures for time series forecasting.
-
-```bibtex
-@inproceedings{Yuqietal-2023-PatchTST,
-  title     = {A Time Series is Worth 64 Words: Long-term Forecasting with Transformers},
-  author    = {Nie, Yuqi and H. Nguyen, Nam and Sinthong, Phanwadee and Kalagnanam, Jayant},
-  booktitle = {International Conference on Learning Representations},
-  year      = {2023}
-}
+```bash
+bash scripts/train_all.sh          # all cells
+bash scripts/train_all.sh ETTm2    # one dataset
 ```
 
-### Dynamic Patching Inspiration
-- **Byte Latent Transformer**: Our dynamic patching approach draws inspiration from advances in NLP, particularly the Byte Latent Transformer's innovative approach to variable-length tokenization.
+Each cell trains at its best configuration and writes
+`checkpoints/<setting>/checkpoint.pth` (overwriting the provided checkpoint for
+that cell), then evaluates.
 
-```bibtex
-@article{meta_blt,
-  title     = {Byte Latent Transformer: Patches Scale Better Than Tokens},
-  author    = {Pagnoni, Artidoro and Pasunuru, Ramakanth and Rodriguez, Pedro and Nguyen, John and Muller, Benjamin and Li, Margaret and Zhou, Chunting and Yu, Lili and Weston, Jason E and Zettlemoyer, Luke and Ghosh, Gargi and Lewis, Mike and Holtzman, Ari and Iyer, Srini},
-  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
-  year      = {2025},
-  address   = {Vienna, Austria},
-  publisher = {Association for Computational Linguistics}
-}
+**Stage 1 — entropy models (optional).** The exact entropy checkpoints used in
+the paper are already in `entropy_model_checkpoints/dm16/`. To regenerate them:
+
+```bash
+bash scripts/train_entropy.sh      # all datasets, writes to entropy_model_checkpoints/dm16/
 ```
 
-### Evaluation and Implementation
-- **TimeKAN Benchmarking Suite**: Our evaluation framework is adapted from the TimeKAN benchmarking suite, providing robust and standardized performance metrics.
+## 5. Best configuration per cell
 
-- **nanoGPT**: The Entropy Model GPT-2 architecture implementation partially incorporates code from Andrej Karpathy's nanoGPT implementation. We gratefully acknowledge this clean and educational codebase.
-  - Repository: https://github.com/karpathy/nanoGPT
+All best per-(dataset, horizon) configurations are in
+[`scripts/best_configs.tsv`](scripts/best_configs.tsv) and drive every script
+above. Fixed across all runs: `seq_len=96`, `label_len=48`, `e_layers=2`,
+`n_heads=4`, `d_ff=256`, `vocab_size=256`, `max_patch_length=16`,
+`boundary_method=entropy`, within-patch encoder attention, RevIN (affine),
+50 epochs, patience 10, `lradj=TST`. Swept per cell: model size tier
+(`small`=d_model 8/global 32, `medium`=16/64, `large`=32/128), batch size,
+learning rate, entropy threshold, dropout, monotonicity, and seed.
 
----
+To run a single cell directly, see `scripts/run_cell.sh` (called by the `*_all`
+scripts).
 
-We thank the authors of these works for their contributions to the open-source community and for advancing the state of the art in time series forecasting and transformer architectures.
+## 6. Repository layout
+
+```
+run_longExp.py            Stage-2 entry point (train / eval forecasting)
+train_entropy_model.py    Stage-1 entry point (train frozen GPT entropy model)
+exp/                      Experiment loop (Exp_Main)
+models/                   EntroPE forecasting model + GPT2 entropy model
+layers/                   Patcher, encoder, global transformer, fusion decoder, RevIN, tokenizer
+data_provider/            Dataset loaders and StandardScaler
+utils/                    Metrics, schedulers, helpers
+scripts/                  best_configs.tsv + reproduction scripts
+dataset/                  Benchmark CSVs
+checkpoints/              Provided forecasting checkpoints (one dir per cell)
+entropy_model_checkpoints/dm16/   Provided frozen entropy models
+```

@@ -1,4 +1,9 @@
-# code from https://github.com/ts-kim/RevIN, with minor modifications
+# Code adapted from the RevIN implementation by ts-kim:
+# https://github.com/ts-kim/RevIN
+#
+# Original license applies.
+# Minor modifications were made for integration into this project.
+
 
 import torch
 import torch.nn as nn
@@ -18,12 +23,12 @@ class RevIN(nn.Module):
         if self.affine:
             self._init_params()
 
-    def forward(self, x, mode:str):
+    def forward(self, x, mode:str, channel_idx=None):
         if mode == 'norm':
             self._get_statistics(x)
-            x = self._normalize(x)
+            x = self._normalize(x, channel_idx)
         elif mode == 'denorm':
-            x = self._denormalize(x)
+            x = self._denormalize(x, channel_idx)
         else: raise NotImplementedError
         return x
 
@@ -40,21 +45,25 @@ class RevIN(nn.Module):
             self.mean = torch.mean(x, dim=dim2reduce, keepdim=True).detach()
         self.stdev = torch.sqrt(torch.var(x, dim=dim2reduce, keepdim=True, unbiased=False) + self.eps).detach()
 
-    def _normalize(self, x):
+    def _normalize(self, x, channel_idx=None):
         if self.subtract_last:
             x = x - self.last
         else:
             x = x - self.mean
         x = x / self.stdev
         if self.affine:
-            x = x * self.affine_weight
-            x = x + self.affine_bias
+            weight = self.affine_weight if channel_idx is None else self.affine_weight[channel_idx]
+            bias = self.affine_bias if channel_idx is None else self.affine_bias[channel_idx]
+            x = x * weight
+            x = x + bias
         return x
 
-    def _denormalize(self, x):
+    def _denormalize(self, x, channel_idx=None):
         if self.affine:
-            x = x - self.affine_bias
-            x = x / (self.affine_weight + self.eps*self.eps)
+            weight = self.affine_weight if channel_idx is None else self.affine_weight[channel_idx]
+            bias = self.affine_bias if channel_idx is None else self.affine_bias[channel_idx]
+            x = x - bias
+            x = x / (weight + self.eps*self.eps)
         x = x * self.stdev
         if self.subtract_last:
             x = x + self.last

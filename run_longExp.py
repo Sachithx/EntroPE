@@ -28,6 +28,10 @@ def create_argument_parser():
                         help='status: 1 for training, 0 for testing')
     parser.add_argument('--model_id', type=str, required=True, default='test', 
                         help='model identifier')
+    parser.add_argument('--setting_suffix', type=str, default='',
+                        help='optional unique suffix appended to the generated setting name; '
+                             'useful for sweeps whose batch/dropout/seed values are otherwise '
+                             'not represented in checkpoint and result paths')
     parser.add_argument('--model', type=str, required=True, default='EntroPE',
                         help='model name')
     
@@ -47,6 +51,8 @@ def create_argument_parser():
                         help='time features encoding frequency')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', 
                         help='location of model checkpoints')
+    parser.add_argument('--save_test_artifacts', type=int, default=1,
+                        help='save prediction arrays and test PDFs (1) or report metrics only (0)')
     
     # Forecasting task configuration
     parser.add_argument('--seq_len', type=int, default=96, 
@@ -76,37 +82,11 @@ def _add_entrope_args(parser):
     # Tokenization
     parser.add_argument('--vocab_size', type=int, default=256, 
                         help='vocabulary size for byte-level tokenization')
-    parser.add_argument('--quant_range', type=int, default=6, 
-                        help='quantization range for tokenization')
     parser.add_argument('--entropy_model_checkpoint_dir', type=str, 
                         default='./entropy_model_checkpoints/', 
                         help='directory for entropy model checkpoints')
     parser.add_argument('--model_id_name', type=str, default='ETTm1', 
                         help='model ID for saved entropy checkpoints')
-    
-    # Architecture - Layers
-    parser.add_argument('--n_layers_local_encoder', type=int, default=2, 
-                        help='number of local encoder layers')
-    parser.add_argument('--n_layers_local_decoder', type=int, default=2, 
-                        help='number of local decoder layers')
-    parser.add_argument('--n_layers_global', type=int, default=2, 
-                        help='number of global layers')
-    
-    # Architecture - Dimensions
-    parser.add_argument('--dim_global', type=int, default=32, 
-                        help='dimension of global representation')
-    parser.add_argument('--dim_local_encoder', type=int, default=16, 
-                        help='dimension of local encoder representation')
-    parser.add_argument('--dim_local_decoder', type=int, default=16, 
-                        help='dimension of local decoder representation')
-    
-    # Architecture - Attention heads
-    parser.add_argument('--n_heads_local_encoder', type=int, default=4, 
-                        help='number of local encoder attention heads')
-    parser.add_argument('--n_heads_local_decoder', type=int, default=4, 
-                        help='number of local decoder attention heads')
-    parser.add_argument('--n_heads_global', type=int, default=4, 
-                        help='number of global attention heads')
     
     # Cross-attention configuration
     parser.add_argument('--cross_attn_k', type=int, default=1, 
@@ -117,8 +97,18 @@ def _add_entrope_args(parser):
                         help='cross attention window size for encoder')
     parser.add_argument('--cross_attn_window_decoder', type=int, default=96, 
                         help='cross attention window size for decoder')
-    parser.add_argument('--local_attention_window_len', type=int, default=96, 
-                        help='local attention window length')
+    parser.add_argument('--local_attention_window_len', type=int, default=96,
+                        help='local attention window length. NOTE: fixed-size sliding-window '
+                             'self-attention only actually applies when < seq_len (see '
+                             '--encoder_self_attn_within_patch for the exact, dynamic-boundary-aware '
+                             'alternative); at the default 96 == seq_len it is equivalent to full causal.')
+    parser.add_argument('--encoder_self_attn_within_patch', type=int, default=1,
+                        help='if 1, the Patch Encoder\'s token-level self-attention is masked to '
+                             'only attend within each token\'s own (variable-length, entropy-defined) '
+                             'patch, instead of full causal over the whole input. Exact and '
+                             'dynamic-boundary-aware, unlike --local_attention_window_len\'s fixed-size '
+                             'window. Default 1 — this is the setting used for ALL reported EntroPE '
+                             'results (local encoder attention never crosses a patch boundary).')
     
     # Patching configuration
     parser.add_argument('--patch_size', type=int, default=16, 
@@ -131,11 +121,91 @@ def _add_entrope_args(parser):
                         help='entropy patching threshold')
     parser.add_argument('--patching_threshold_add', type=float, default=0.2, 
                         help='additional patching threshold')
-    parser.add_argument('--monotonicity', type=int, default=0, 
+    parser.add_argument('--monotonicity', type=int, default=0,
                         help='monotonic patching (1: True, 0: False)')
-    
+    parser.add_argument('--channel_sample_size', type=int, default=None,
+                        help='if set and less than enc_in, randomly sample this many '
+                             'channels per training iteration (channel-independent '
+                             'architectures only) to bound activation memory on '
+                             'very high-channel-count datasets; validation/test '
+                             'always use every channel')
+    parser.add_argument('--decoder_pool_size', type=int, default=None,
+                        help='if set, adaptively pool the seq_len dimension down to '
+                             'this fixed size before the flatten+linear prediction '
+                             'head, so the head\'s parameter count (d_model*R) is '
+                             'independent of input length -- use for L=96 vs L=512 '
+                             'comparisons where the unpooled head (d_model*seq_len) '
+                             'would otherwise confound length with model size')
+    parser.add_argument('--decoder_mode', type=str, default='flatten',
+                        choices=['flatten', 'horizon_query', 'latent_resampler', 'patchtst_head'],
+                        help='flatten: original Linear(d_model*seq_len -> pred_len) head '
+                             '(param count scales with L; ignores --decoder_pool_size unless set). '
+                             'horizon_query: fixed sinusoidal per-horizon-step queries '
+                             'cross-attend directly to the backbone\'s point-level output; '
+                             'decoder params are O(d_model^2), independent of L and pred_len. '
+                             'latent_resampler: same, but the point-level output is first '
+                             'cross-attended into --n_latent_tokens fixed latent tokens before '
+                             'the horizon queries attend to those instead of the raw output. '
+                             'patchtst_head: skip the fusion decoder entirely and flatten+linear '
+                             'directly on patch-level global-transformer output (dim_global), '
+                             'matching PatchTST\'s own head; requires --decoder_pool_size since '
+                             'dynamic patching gives a variable patch count per batch.')
+    parser.add_argument('--n_latent_tokens', type=int, default=32,
+                        help='number of fixed latent tokens for --decoder_mode latent_resampler')
+    parser.add_argument('--boundary_method', type=str, default='entropy',
+                        choices=['entropy', 'static', 'local_diff', 'variance_cp',
+                                 'cusum', 'random', 'empirical_entropy', 'frequency_based',
+                                 'cmi_threshold', 'learned_cmi'],
+                        help='boundary detection method: entropy (EntroPE default), '
+                             'static, local_diff, variance_cp, cusum, random, '
+                             'empirical_entropy (EAPformer-style), frequency_based, '
+                             'cmi_threshold (MVG+CMI+threshold, v2 fallback), '
+                             'learned_cmi (end-to-end learned, requires --model EntroPE_v2)')
+
+    # ---- EntroPE_v2 / MVG model ----
+    parser.add_argument('--mvg_layers',   type=int,   default=2,
+                        help='MVG causal transformer layers')
+    parser.add_argument('--mvg_embd',     type=int,   default=64,
+                        help='MVG embedding dimension')
+    parser.add_argument('--mvg_heads',    type=int,   default=4,
+                        help='MVG attention heads')
+    parser.add_argument('--mvg_dropout',  type=float, default=0.1,
+                        help='MVG dropout')
+    parser.add_argument('--mvg_cov_rank', type=int,   default=None,
+                        help='MVG covariance rank (None=full Cholesky, int=low-rank+diag)')
+    parser.add_argument('--mvg_checkpoint', type=str, default=None,
+                        help='Path to pretrained MVG checkpoint (from pretrain_mvg.py)')
+
+    # ---- Boundary scorer ----
+    parser.add_argument('--scorer_hidden', type=int, default=64,
+                        help='Hidden dim of LearnedBoundaryScorer MLP')
+
+    # ---- Gumbel-sigmoid patcher ----
+    parser.add_argument('--gumbel_tau_init',  type=float, default=5.0,
+                        help='Initial Gumbel-sigmoid temperature')
+    parser.add_argument('--gumbel_tau_min',   type=float, default=0.5,
+                        help='Minimum Gumbel-sigmoid temperature (after annealing)')
+    parser.add_argument('--gumbel_tau_decay', type=int,   default=5000,
+                        help='Decay steps for Gumbel temperature annealing')
+
+    # ---- Patch-rate regularisation ----
+    parser.add_argument('--target_avg_patch_len', type=int,   default=8,
+                        help='Target average patch length (controls boundary rate)')
+    parser.add_argument('--min_patch_len',        type=int,   default=3,
+                        help='Minimum allowed patch length (penalised if violated)')
+    parser.add_argument('--lambda_count', type=float, default=10.0,
+                        help='Weight for patch-rate regulariser')
+    parser.add_argument('--lambda_min',   type=float, default=0.5,
+                        help='Weight for min-patch-length regulariser')
+    parser.add_argument('--lambda_div',   type=float, default=0.1,
+                        help='Weight for boundary-diversity regulariser')
+    parser.add_argument('--lambda_nll',   type=float, default=0.1,
+                        help='Weight for MVG calibration NLL term')
+    parser.add_argument('--beta_nll',     type=float, default=0.5,
+                        help='beta for Seitzer 2022 beta-NLL (0=MSE-like, 1=standard NLL)')
+
     # Regularization
-    parser.add_argument('--fc_dropout', type=float, default=0.1, 
+    parser.add_argument('--fc_dropout', type=float, default=0.1,
                         help='fully connected layer dropout')
     parser.add_argument('--head_dropout', type=float, default=0.1, 
                         help='prediction head dropout')
@@ -143,8 +213,6 @@ def _add_entrope_args(parser):
                         help='general dropout rate')
     
     # Other EntroPE settings
-    parser.add_argument('--multiple_of', type=int, default=128, 
-                        help='dimension multiple for efficient computation')
     parser.add_argument('--stride', type=int, default=8, 
                         help='stride for patching')
     parser.add_argument('--padding_patch', type=str, default='end', 
@@ -183,8 +251,18 @@ def _add_transformer_args(parser):
                         help='number of encoder layers')
     parser.add_argument('--d_layers', type=int, default=1, 
                         help='number of decoder layers')
-    parser.add_argument('--d_ff', type=int, default=2048, 
+    parser.add_argument('--d_ff', type=int, default=2048,
                         help='dimension of feedforward network')
+    parser.add_argument('--global_d_model', type=int, default=None,
+                        help='override d_model for the Global Transformer only '
+                             '(e.g. to match a baseline like PatchTST); None = use --d_model')
+    parser.add_argument('--global_e_layers', type=int, default=None,
+                        help='override e_layers for the Global Transformer only; None = use --e_layers')
+    parser.add_argument('--global_n_heads', type=int, default=None,
+                        help='override n_heads for the Global Transformer only; None = use --n_heads')
+    parser.add_argument('--global_d_ff', type=int, default=None,
+                        help='override the FFN rounding unit for the Global Transformer only; '
+                             'None = use --d_ff (shared)')
     parser.add_argument('--moving_avg', type=int, default=25, 
                         help='window size of moving average')
     parser.add_argument('--factor', type=int, default=1, 
@@ -256,20 +334,45 @@ def configure_gpu(args):
 
 def generate_setting_name(args):
     """Generate experiment setting name"""
-    return (
-        f"{args.model}_{args.data}"
+    bm = getattr(args, 'boundary_method', 'entropy')
+    # Use model_id_name, not args.data: every "custom"-loader dataset (Electricity,
+    # weather, Traffic, ...) shares args.data=='custom', so using args.data here
+    # collided their checkpoint paths whenever hyperparameters otherwise matched --
+    # confirmed happening in practice (weather crashed loading a checkpoint shaped
+    # for Traffic's 862 channels while both ran concurrently on the same setting).
+    # model_id_name is set uniquely per dataset in every launch script.
+    setting = (
+        f"{args.model}_{args.model_id_name}"
         f"_SL{args.seq_len}"
         f"_PL{args.pred_len}"
-        f"_GL{args.n_layers_global}"
-        f"_EL{args.n_layers_local_encoder}"
-        f"_DL{args.n_layers_local_decoder}"
-        f"_GD{args.dim_global}"
-        f"_DD{args.dim_local_decoder}"
-        f"_ED{args.dim_local_encoder}"
-        f"_GH{args.n_heads_global}"
-        f"_EH{args.n_heads_local_encoder}"
-        f"_DH{args.n_heads_local_decoder}"
+        f"_EL{args.e_layers}"
+        f"_ED{args.d_model}"
+        f"_NH{args.n_heads}"
+        f"_MP{args.max_patch_length}"
+        f"_TH{args.patching_threshold}"
+        f"_MO{args.monotonicity}"
+        f"_BM{bm}"
+        f"_LR{args.learning_rate}"
     )
+    # global_* (independent Global Transformer sizing, e.g. to match a
+    # baseline's own hyperparameters) aren't reflected above; append them
+    # when set so such runs can't collide with a same-shaped default run.
+    gd = getattr(args, 'global_d_model', None)
+    gl = getattr(args, 'global_e_layers', None)
+    gh = getattr(args, 'global_n_heads', None)
+    gf = getattr(args, 'global_d_ff', None)
+    if any(v is not None for v in (gd, gl, gh, gf)):
+        setting += f"_GD{gd}_GL{gl}_GH{gh}_GF{gf}"
+    suffix = getattr(args, 'setting_suffix', '')
+    if suffix:
+        # Keep the suffix path-safe.  Sweep launchers use only this character
+        # set, but normalizing here also protects direct CLI callers.
+        safe_suffix = ''.join(
+            char if char.isalnum() or char in ('-', '_') else '-'
+            for char in suffix
+        )
+        setting += f"_{safe_suffix}"
+    return setting
 
 
 def run_training(args, exp, setting):
