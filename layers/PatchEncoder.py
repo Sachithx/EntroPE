@@ -29,7 +29,7 @@ RMSNorm = nn.RMSNorm
 
 from layers.Args import LocalModelBase, LocalModelArgs
 from layers.BaseTransformer import CrossAttention
-from utils.layer_utils import downsample
+from utils.layer_utils import downsample, sliding_window_causal_mask, within_patch_causal_mask
 
 
 class PatchEncoder(LocalModelBase):
@@ -108,9 +108,16 @@ class PatchEncoder(LocalModelBase):
     ):
         bs, seqlen = tokens.shape
 
-        # Default to causal attention
+        # Default to causal attention -- optionally restricted so a token can
+        # only attend within its own (dynamic, entropy-defined) patch, or
+        # within a fixed-size local window, instead of the full sequence.
         if mask is None:
-            mask = "causal"
+            if self.encoder_self_attn_within_patch and patch_ids is not None:
+                mask = within_patch_causal_mask(patch_ids, seqlen).unsqueeze(1)
+            elif self.sliding_window is not None and self.sliding_window < seqlen:
+                mask = sliding_window_causal_mask(seqlen, self.sliding_window, tokens.device)
+            else:
+                mask = "causal"
 
         # ----------------------------------
         # Token Embedding + Positional Encoding

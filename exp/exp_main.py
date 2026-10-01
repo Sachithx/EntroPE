@@ -1,7 +1,6 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
 from models import EntroPE
-from models import EntroPE_v2
 from utils.tools import EarlyStopping, adjust_learning_rate, visual, test_params_flop
 from utils.metrics import metric
 
@@ -88,7 +87,6 @@ class Exp_Main(Exp_Basic):
     def _build_model(self):
         model_dict = {
             'EntroPE':    EntroPE,
-            'EntroPE_v2': EntroPE_v2,
         }
         model = model_dict[self.args.model].Model(self.args).float()
 
@@ -125,10 +123,10 @@ class Exp_Main(Exp_Basic):
         """Check if model uses simplified forward pass"""
         return 'Linear' in self.args.model or 'EntroPE' in self.args.model
 
-    def _forward_model(self, batch_x, batch_x_mark, dec_inp, batch_y_mark):
+    def _forward_model(self, batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=None):
         """Forward pass handling both simple and complex models"""
         if self._is_simple_model():
-            return self.model(batch_x)
+            return self.model(batch_x, channel_idx=channel_idx)
         else:
             if self.args.output_attention:
                 return self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
@@ -241,6 +239,19 @@ class Exp_Main(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # For very high-channel-count datasets (e.g. Traffic, 862 channels),
+                # channel independence means training doesn't need every channel in
+                # the same batch -- randomly subsample a fixed number of channels per
+                # iteration to bound activation memory. Only applied in training;
+                # vali()/test() always use every real channel for correct metrics.
+                channel_idx = None
+                sample_size = getattr(self.args, 'channel_sample_size', None)
+                n_vars = batch_x.shape[2]
+                if sample_size is not None and sample_size < n_vars:
+                    channel_idx = torch.randperm(n_vars, device=self.device)[:sample_size]
+                    batch_x = batch_x[:, :, channel_idx]
+                    batch_y = batch_y[:, :, channel_idx]
+
                 # Log FLOPs on first batch
                 if epoch == 0 and i == 0:
                     try:
@@ -264,7 +275,7 @@ class Exp_Main(Exp_Basic):
                 # Forward pass
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=channel_idx)
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
                         batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
@@ -273,7 +284,7 @@ class Exp_Main(Exp_Basic):
                         if hasattr(self.model, 'auxiliary_losses'):
                             loss = loss + self.model.auxiliary_losses()
                 else:
-                    outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs = self._forward_model(batch_x, batch_x_mark, dec_inp, batch_y_mark, channel_idx=channel_idx)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
@@ -369,13 +380,16 @@ class Exp_Main(Exp_Basic):
         if test:
             print('Loading model')
             self.model.load_state_dict(
-                torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'))
+                torch.load(os.path.join(self.args.checkpoints, setting, 'checkpoint.pth'),
+                           map_location=self.device)
             )
 
         preds = []
         trues = []
-        folder_path = './test_results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
+        save_test_artifacts = bool(getattr(self.args, 'save_test_artifacts', 1))
+        if save_test_artifacts:
+            folder_path = './test_results/' + setting + '/'
+            os.makedirs(folder_path, exist_ok=True)
 
         self.model.eval()
         with torch.no_grad():
@@ -407,7 +421,7 @@ class Exp_Main(Exp_Basic):
                 trues.append(batch_y)
                 
                 # Visualize predictions
-                if i % 20 == 0:
+                if save_test_artifacts and i % 20 == 0:
                     input_data = batch_x.detach().cpu().numpy()
                     gt = np.concatenate((input_data[0, :, -1], batch_y[0, :, -1]), axis=0)
                     pd = np.concatenate((input_data[0, :, -1], outputs[0, :, -1]), axis=0)
@@ -469,14 +483,14 @@ class Exp_Main(Exp_Basic):
         plt.close(fig)
         
         # Save results
-        folder_path = './results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
-        
         with open("result.txt", 'a') as f:
             f.write(f"{setting}\n")
             f.write(f'MSE: {mse}, MAE: {mae}, RSE: {rse}\n\n')
 
-        np.save(os.path.join(folder_path, 'pred.npy'), preds)
+        if save_test_artifacts:
+            folder_path = './results/' + setting + '/'
+            os.makedirs(folder_path, exist_ok=True)
+            np.save(os.path.join(folder_path, 'pred.npy'), preds)
         
         return
 

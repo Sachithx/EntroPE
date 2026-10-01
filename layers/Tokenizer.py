@@ -154,7 +154,16 @@ def build_tokenizer(configs):
     """
     Build a tokenizer that maps byte values to tokens.
     """
-    _, data_loader = data_provider(configs, "train")
+    # find_quant_range does a single full pass over the training set to
+    # calibrate quantization bins -- a one-time cost independent of the
+    # actual training batch_size. Reusing configs.batch_size directly here
+    # means a small training batch_size (e.g. reduced for memory reasons on
+    # high-channel-count/long-seq_len datasets) needlessly multiplies
+    # DataLoader/Python-loop overhead for this scan. Decouple them.
+    import copy
+    scan_configs = copy.copy(configs)
+    scan_configs.batch_size = max(getattr(configs, 'batch_size', 32), 256)
+    _, data_loader = data_provider(scan_configs, "train")
     _, quant_range_info = find_quant_range(data_loader)
     low_limit = quant_range_info["q_low"]
     high_limit = quant_range_info["q_high"]

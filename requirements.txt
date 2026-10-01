@@ -1,11 +1,11 @@
-torch
-numpy
-pandas
-scipy
-scikit-learn
-accelerate>=0.20.0
-datasets>=2.0.0
-evaluate>=0.4.0
-matplotlib>=3.5.0
-ptflops>=0.6.0
-pydantic
+# EntroPE (NeurIPS 2026) — forecasting reproduction
+# Tested with Python 3.10 and CUDA 12.x. Version pins below are what we used;
+# nearby versions should also work.
+torch>=2.1
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.2
+matplotlib>=3.7
+tqdm>=4.65
+pydantic>=2.0
+huggingface_hub>=0.20   # for download_data.py (datasets + checkpoints)

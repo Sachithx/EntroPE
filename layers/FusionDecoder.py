@@ -60,6 +60,17 @@ class FusionDecoder(LocalModelBase):
         if self.cross_attn_decoder:
             self._init_cross_attention_layers(args)
 
+        # Project incoming patch_embeds (Global Transformer output) down to this
+        # decoder's own dim when they differ -- e.g. when the Global Transformer
+        # is independently resized (global_d_model) to match a baseline's own
+        # hyperparameters while the Fusion Decoder stays at EntroPE's own size.
+        # Previously dim_patch_emb always equaled args.dim, so this was never needed.
+        dim_patch_emb = getattr(args, 'dim_patch_emb', None)
+        if dim_patch_emb is not None and dim_patch_emb != args.dim:
+            self.patch_emb_projection = nn.Linear(dim_patch_emb, args.dim, bias=False)
+        else:
+            self.patch_emb_projection = None
+
     # ----------------------------------
     # Cross-Attention Layer Builder
     # ----------------------------------
@@ -117,6 +128,9 @@ class FusionDecoder(LocalModelBase):
             mask = "causal"
 
         h = embeds
+
+        if self.patch_emb_projection is not None and patch_embeds is not None:
+            patch_embeds = self.patch_emb_projection(patch_embeds)
 
         # ----------------------------------
         # Rotary / Positional Encoding

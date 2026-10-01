@@ -59,24 +59,27 @@ class Model(nn.Module):
         print(f"  RevIN: {configs.revin}")
         print(f"  Individual: {configs.individual}")
     
-    def forward(self, x):
+    def forward(self, x, channel_idx=None):
         """
         Forward pass through the model.
-        
+
         Args:
             x: Input tensor of shape [batch_size, seq_len, n_vars]
-            
+            channel_idx: Optional 1D LongTensor identifying which real channels
+                are present in x's n_vars dim (for random channel subsampling on
+                very high-channel-count datasets). See EntroPE_backbone.forward.
+
         Returns:
             Output tensor of shape [batch_size, pred_len, n_vars]
         """
         # Transform: [batch_size, seq_len, n_vars] -> [batch_size, n_vars, seq_len]
         x = x.permute(0, 2, 1)
-        
+
         # Pass through backbone
-        x = self.model(x)
-        
+        x = self.model(x, channel_idx=channel_idx)
+
         # Transform back: [batch_size, n_vars, pred_len] -> [batch_size, pred_len, n_vars]
         x = x.permute(0, 2, 1)
-        
+
         return x
     
