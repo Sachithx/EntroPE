@@ -100,7 +100,7 @@ models/                   EntroPE forecasting model + GPT2 entropy model
 layers/                   Patcher, encoder, global transformer, fusion decoder, RevIN, tokenizer
 data_provider/            Dataset loaders and StandardScaler
 utils/                    Metrics, schedulers, helpers
-scripts/                  per-dataset run scripts (<DATASET>.sh, train|eval), _common.sh, run_all.sh, train_entropy.sh
+scripts/                  per-dataset run scripts (<DATASET>.sh, train|eval), run_all.sh, train_entropy.sh
 dataset/                  Benchmark CSVs
 checkpoints/              Provided forecasting checkpoints (one dir per cell)
 entropy_model_checkpoints/dm16/   Provided frozen entropy models
