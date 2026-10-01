@@ -1,90 +1,90 @@
-#!/bin/bash
-source "$(dirname "$0")/run.sh"
+#!/usr/bin/env bash
+# EntroPE — ETTh1 (input length L=96). Best config per horizon.
+#
+# Usage:  bash scripts/ETTh1.sh [train|eval]        (default: eval)
+#   eval   evaluate the provided checkpoints (download_data.py --what checkpoints)
+#   train  train from scratch, then evaluate (overwrites that cell's checkpoint)
+# Pick a GPU with:  GPU=1 bash scripts/ETTh1.sh eval
 
-mkdir -p ./logs/LongForecasting
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-# =========================
-# Fixed experiment metadata
-# =========================
-model=EntroPE
-data=ETTh1
-features=M
-root_path=./dataset/
-data_path=ETTh1.csv
-model_id_name=ETTh1
-enc_in=7
-freq=h
-seq_len=96
-batch_size=128
-seed=42
+MODE="${1:-eval}"
+[ "${MODE:-eval}" = "train" ] && IS_TRAINING=1 || IS_TRAINING=0
+export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 
-# =========================
-# Core architecture params
-# =========================
-d_model=8
-n_heads=2
-e_layers=3
-d_ff=256
+echo; echo "----- ETTh1  H=96  (mode=${MODE:-eval}) -----"
+python -u run_longExp.py \
+  --is_training "$IS_TRAINING" \
+  --model_id "ETTh1_L96_H96_medium_bs64_lr1e-2_th095_dp01_mo0_s94" --model_id_name "ETTh1" --setting_suffix "ETTh1_L96_H96_medium_bs64_lr1e-2_th095_dp01_mo0_s94" \
+  --data "ETTh1" --data_path "ETTh1.csv" --freq "h" \
+  --enc_in 7 --dec_in 7 --c_out 7 \
+  --pred_len 96 \
+  --d_model 16 --global_d_model 64 \
+  --batch_size 64 --learning_rate 0.01 \
+  --patching_threshold 0.95 --monotonicity 0 \
+  --dropout 0.1 --head_dropout 0.1 --fc_dropout 0.1 \
+  --random_seed 94
 
-# =========================
-# Patching params
-# =========================
-max_patch_length=32
-patching_threshold=0.95
-monotonicity=0
 
-# =========================
-# Optimization params
-# =========================
-dropout=0.1
-learning_rate=0.01
-train_epochs=10
-itr=1
-des=Exp
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-# =========================
-# Training mode
-# =========================
-is_training=1
+MODE="${1:-eval}"
+[ "${MODE:-eval}" = "train" ] && IS_TRAINING=1 || IS_TRAINING=0
+export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 
-# =========================
-# Experiment loop
-# =========================
-for pred_len in 96; do
-    
-    model_id="${model_id_name}_${seq_len}preds${pred_len}"
-    
-    echo "Running $seq_len -> $pred_len ..."
-    
-    $PYTHON -u run_longExp.py \
-        --model $model \
-        --data $data \
-        --features $features \
-        --seq_len $seq_len \
-        --pred_len $pred_len \
-        --root_path $root_path \
-        --data_path $data_path \
-        --model_id_name $model_id_name \
-        --model_id $model_id \
-        --freq $freq \
-        --enc_in $enc_in \
-        --d_model $d_model \
-        --n_heads $n_heads \
-        --e_layers $e_layers \
-        --d_ff $d_ff \
-        --max_patch_length $max_patch_length \
-        --patching_threshold $patching_threshold \
-        --monotonicity $monotonicity \
-        --dropout $dropout \
-        --learning_rate $learning_rate \
-        --batch_size $batch_size \
-        --train_epochs $train_epochs \
-        --itr $itr \
-        --des $des \
-        --is_training $is_training \
-        --random_seed $seed \
-        > logs/LongForecasting/${model}_${model_id}.log 2>&1
+echo; echo "----- ETTh1  H=192  (mode=${MODE:-eval}) -----"
+python -u run_longExp.py \
+  --is_training "$IS_TRAINING" \
+  --model_id "ETTh1_L96_H192_small_bs128_lr1e-2_th075_dp01_mo1_s2026" --model_id_name "ETTh1" --setting_suffix "ETTh1_L96_H192_small_bs128_lr1e-2_th075_dp01_mo1_s2026" \
+  --data "ETTh1" --data_path "ETTh1.csv" --freq "h" \
+  --enc_in 7 --dec_in 7 --c_out 7 \
+  --pred_len 192 \
+  --d_model 8 --global_d_model 32 \
+  --batch_size 128 --learning_rate 0.01 \
+  --patching_threshold 0.75 --monotonicity 1 \
+  --dropout 0.1 --head_dropout 0.1 --fc_dropout 0.1 \
+  --random_seed 2026
 
-done
 
-echo "All experiments finished."
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+MODE="${1:-eval}"
+[ "${MODE:-eval}" = "train" ] && IS_TRAINING=1 || IS_TRAINING=0
+export CUDA_VISIBLE_DEVICES="${GPU:-0}"
+
+echo; echo "----- ETTh1  H=336  (mode=${MODE:-eval}) -----"
+python -u run_longExp.py \
+  --is_training "$IS_TRAINING" \
+  --model_id "ETTh1_L96_H336_small_bs64_lr1e-2_th085_dp01_mo0_s2026" --model_id_name "ETTh1" --setting_suffix "ETTh1_L96_H336_small_bs64_lr1e-2_th085_dp01_mo0_s2026" \
+  --data "ETTh1" --data_path "ETTh1.csv" --freq "h" \
+  --enc_in 7 --dec_in 7 --c_out 7 \
+  --pred_len 336 \
+  --d_model 8 --global_d_model 32 \
+  --batch_size 64 --learning_rate 0.01 \
+  --patching_threshold 0.85 --monotonicity 0 \
+  --dropout 0.1 --head_dropout 0.1 --fc_dropout 0.1 \
+  --random_seed 2026
+
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+MODE="${1:-eval}"
+[ "${MODE:-eval}" = "train" ] && IS_TRAINING=1 || IS_TRAINING=0
+export CUDA_VISIBLE_DEVICES="${GPU:-0}"
+
+echo; echo "----- ETTh1  H=720  (mode=${MODE:-eval}) -----"
+python -u run_longExp.py \
+  --is_training "$IS_TRAINING" \
+  --model_id "ETTh1_L96_H720_small_bs32_lr1e-2_th085_dp02_mo0_s10" --model_id_name "ETTh1" --setting_suffix "ETTh1_L96_H720_small_bs32_lr1e-2_th085_dp02_mo0_s10" \
+  --data "ETTh1" --data_path "ETTh1.csv" --freq "h" \
+  --enc_in 7 --dec_in 7 --c_out 7 \
+  --pred_len 720 \
+  --d_model 8 --global_d_model 32 \
+  --batch_size 32 --learning_rate 0.01 \
+  --patching_threshold 0.85 --monotonicity 0 \
+  --dropout 0.2 --head_dropout 0.2 --fc_dropout 0.2 \
+  --random_seed 10

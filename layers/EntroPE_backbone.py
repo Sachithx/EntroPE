@@ -17,6 +17,7 @@
 
 __all__ = ['EntroPE_backbone']
 
+import math
 import torch
 from torch import nn
 import warnings
@@ -79,6 +80,7 @@ class EntroPE(nn.Module, SequenceModelWithOutput):
                     quantile_threshold=args.patching_threshold,
                     monotonicity=args.monotonicity,
                     max_patch_length=args.max_patch_length,
+                    patch_size=args.patch_size,
                     patching_batch_size=args.patching_batch_size,
                 )
             )
@@ -166,6 +168,49 @@ class EntroPE(nn.Module, SequenceModelWithOutput):
         )
 
         return output
+
+    def forward_patch_level(
+        self,
+        tokens: torch.Tensor,
+        patch_lengths: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Same as forward() up through the global transformer, but returns the
+        patch-level representations directly instead of running them through
+        the fusion decoder. Used for head variants (e.g. a PatchTST-style
+        flatten+linear head) that predict straight from patch embeddings,
+        matching PatchTST's own architecture which has no token-level decode
+        step at all.
+
+        Returns: h_global of shape (batch_size, num_patches, dim_global)
+        """
+        bs, N = tokens.shape
+
+        nb_boe = 0 if self.patching_mode != "" else self.patch_size - 1
+        patch_encoder_tokens, _, _ = get_entrope_input(
+            tokens=tokens,
+            enforce_patch_size_multiple=False,
+            nb_boe=nb_boe,
+            patch_size=self.patch_size,
+            boe_id=self.boe_id,
+        )
+
+        patch_lengths = self._get_patch_lengths(patch_encoder_tokens, patch_lengths, nb_boe)
+        patch_ids = patch_ids_from_lengths(patch_lengths, patch_encoder_tokens.shape[-1])
+
+        h_encoder, h_cross = self._encode_patches(
+            patch_encoder_tokens, patch_ids, patch_lengths, N
+        )
+
+        h_patches = self._downsample_to_patches(
+            h_encoder, h_cross, patch_ids, patch_lengths, bs
+        )
+
+        h_global = self._apply_global_transformer(
+            h_patches, patch_encoder_tokens, patch_ids, bs
+        )
+
+        return h_global
 
     def _get_patch_lengths(
         self, 
@@ -334,17 +379,138 @@ class EntroPE_backbone(nn.Module):
         # Build and initialize EntroPE model
         model_args = self._build_entrope_args(configs)
         self.backbone = EntroPE(model_args)
-        
+
+        # Initialize tok_embeddings from entropy model's wte.
+        # Both encode the same discrete vocab, so the entropy model's learned
+        # token representations give the backbone a warm start.
+        # Only applied when dims match (n_embd == d_model).
+        if (hasattr(self.backbone, 'patcher')
+                and self.backbone.patcher.patching_mode.value == 'entropy'):
+            _em = self.backbone.patcher._base_entropy_model
+            if _em is not None:
+                bb_dim  = self.backbone.patch_encoder.tok_embeddings.weight.shape[1]
+                ent_dim = _em.transformer.wte.weight.shape[1]
+                if bb_dim == ent_dim:
+                    self.backbone.patch_encoder.tok_embeddings.weight.data.copy_(
+                        _em.transformer.wte.weight.float()
+                    )
+                    print(f"  [EntroPE_backbone] Initialized tok_embeddings "
+                          f"(dim={bb_dim}) from entropy model")
+                else:
+                    print(f"  [EntroPE_backbone] Embedding dim mismatch "
+                          f"(backbone={bb_dim}, entropy={ent_dim}); "
+                          f"set --n_embd {bb_dim} when training entropy model to enable init.")
+
         # Initialize tokenizer
         self.tokenizer = build_tokenizer(configs)
         
-        # Build prediction head
-        self.head_nf = configs.d_model * configs.seq_len
+        # Prediction head / decoder. decoder_mode selects between:
+        #   'flatten' (default) -- original Linear(d_model*seq_len -> pred_len)
+        #       head, optionally preceded by decoder_pool_size's AdaptiveAvgPool1d
+        #       (see that flag's own comment). Param count scales with L (and
+        #       with H, via the Linear's target_window dim) unless pooled.
+        #   'horizon_query'    -- H fixed-sinusoidal-position forecast queries
+        #                         cross-attend directly to the backbone's
+        #                         point-level output X (memory length = seq_len,
+        #                         varies with L, but the query/head parameters
+        #                         do not).
+        #   'latent_resampler' -- X is first resampled into a fixed number of
+        #                         latent tokens via cross-attention, then the
+        #                         same H forecast queries attend to that
+        #                         fixed-size latent set instead of X directly.
+        # The last two give O(d^2) decoder params independent of BOTH L and H
+        # (queries are a fixed sinusoidal table sliced to pred_len, not a
+        # learned H-sized matrix) -- unlike 'flatten', pooled or not, whose
+        # Linear(nf, target_window) always bakes H into its weight shape.
+        # IMPORTANT: the old head/pool machinery is only constructed when
+        # actually used -- otherwise its (L-dependent) parameters would still
+        # be counted even though forward() never calls it for the new modes.
+        self.decoder_mode = getattr(configs, 'decoder_mode', 'flatten')
         self.n_vars = configs.enc_in
         self.pretrain_head = pretrain_head
         self.head_type = head_type
         self.individual = individual
-        self.head = self._build_head(configs)
+        self.pred_len = configs.pred_len
+
+        if self.decoder_mode == 'flatten':
+            self.decoder_pool_size = getattr(configs, 'decoder_pool_size', None)
+            if self.decoder_pool_size is not None:
+                self.decoder_pool = nn.AdaptiveAvgPool1d(self.decoder_pool_size)
+                self.head_nf = configs.d_model * self.decoder_pool_size
+            else:
+                self.decoder_pool = None
+                self.head_nf = configs.d_model * configs.seq_len
+            self.head = self._build_head(configs)
+        elif self.decoder_mode == 'patchtst_head':
+            # PatchTST-style head: flatten+linear directly on patch-level
+            # global-transformer output (dim_global), skipping the fusion
+            # decoder entirely -- matches PatchTST's own architecture, which
+            # has no token-level decode step. Dynamic patching produces a
+            # variable number of patches per batch, so --decoder_pool_size
+            # (adaptive-pooled over the patch dimension) is required to give
+            # the head a fixed input size; for a fixed-patch-count baseline
+            # (e.g. static patching) set it to that exact patch count so the
+            # two variants' heads have identical parameter shapes.
+            global_dim = getattr(configs, 'global_d_model', None) or configs.d_model
+            self.decoder_pool_size = getattr(configs, 'decoder_pool_size', None)
+            if self.decoder_pool_size is None:
+                raise ValueError(
+                    "--decoder_mode patchtst_head requires --decoder_pool_size "
+                    "(fixed number of patch slots for the flatten+linear head)."
+                )
+            self.decoder_pool = nn.AdaptiveAvgPool1d(self.decoder_pool_size)
+            self.head_nf = global_dim * self.decoder_pool_size
+            self.head = self._build_head(configs)
+        else:
+            self.decoder_pool_size = None
+            self.decoder_pool = None
+            self.head = None
+
+        if self.decoder_mode in ('horizon_query', 'latent_resampler'):
+            self.hq_cross_attn = nn.MultiheadAttention(
+                configs.d_model, configs.n_heads, dropout=configs.dropout, batch_first=True
+            )
+            self.hq_output_head = nn.Linear(configs.d_model, 1)
+            max_horizon = max(configs.pred_len, 768)  # headroom to slice from, built once
+            self.register_buffer(
+                'horizon_pos_emb', self._sinusoidal_embedding(max_horizon, configs.d_model),
+                persistent=False,
+            )
+            if self.decoder_mode == 'latent_resampler':
+                n_latent = getattr(configs, 'n_latent_tokens', 32)
+                self.latent_tokens = nn.Parameter(torch.randn(1, n_latent, configs.d_model) * 0.02)
+                self.resample_cross_attn = nn.MultiheadAttention(
+                    configs.d_model, configs.n_heads, dropout=configs.dropout, batch_first=True
+                )
+
+    @staticmethod
+    def _sinusoidal_embedding(length, dim):
+        pe = torch.zeros(length, dim)
+        position = torch.arange(0, length).unsqueeze(1).float()
+        div_term = torch.exp(torch.arange(0, dim, 2).float() * -(math.log(10000.0) / dim))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe
+
+    def _decode_length_independent(self, x, pred_len):
+        """
+        x: [bs*nvars, seq_len, d_model] -- the backbone's point-level output.
+        Returns: [bs*nvars, pred_len] (one scalar per future timestep; each row
+        of x is already a single channel, matching the rest of this file's
+        channel-independent convention).
+        """
+        bnv = x.shape[0]
+        queries = self.horizon_pos_emb[:pred_len].unsqueeze(0).expand(bnv, -1, -1).to(x.dtype)
+
+        if self.decoder_mode == 'latent_resampler':
+            latents = self.latent_tokens.expand(bnv, -1, -1)
+            memory, _ = self.resample_cross_attn(latents, x, x, need_weights=False)
+        else:
+            memory = x
+
+        out, _ = self.hq_cross_attn(queries, memory, memory, need_weights=False)  # [bnv, pred_len, d_model]
+        out = self.hq_output_head(out).squeeze(-1)  # [bnv, pred_len]
+        return out
     
     def _build_entrope_args(self, configs) -> EntroPEArgs:
         """Build EntroPE arguments from configuration."""
@@ -358,23 +524,28 @@ class EntroPE_backbone(nn.Module):
             
             # Attention windows
             local_attention_window_len=configs.local_attention_window_len,
+            encoder_self_attn_within_patch=getattr(configs, 'encoder_self_attn_within_patch', False),
             cross_attn_window_decoder=configs.cross_attn_window_decoder,
             cross_attn_window_encoder=configs.cross_attn_window_encoder,
             
             # Model dimensions
-            dim_global=configs.d_model,
+            # global_* CLI overrides let the Global Transformer be sized independently
+            # from the Patch Encoder / Fusion Decoder (e.g. to match a baseline's own
+            # published hyperparameters); None -> old shared-d_model behavior.
+            dim_global=getattr(configs, 'global_d_model', None) or configs.d_model,
             dim_local_encoder=configs.d_model,
             dim_local_decoder=configs.d_model,
-            
+
             # Layer configurations
-            n_layers_global=configs.e_layers,
+            n_layers_global=getattr(configs, 'global_e_layers', None) or configs.e_layers,
             n_layers_local_encoder=1,
             n_layers_local_decoder=1,
-            
+
             # Attention heads
-            n_heads_global=configs.n_heads,
+            n_heads_global=getattr(configs, 'global_n_heads', None) or configs.n_heads,
             n_heads_local_encoder=configs.n_heads,
             n_heads_local_decoder=configs.n_heads,
+            multiple_of_global=getattr(configs, 'global_d_ff', None),
             
             # Patching configuration
             patch_size=configs.max_patch_length,
@@ -438,22 +609,29 @@ class EntroPE_backbone(nn.Module):
         else:
             raise ValueError(f"Unknown head_type: {self.head_type}")
     
-    def forward(self, z):
+    def forward(self, z, channel_idx=None):
         """
         Forward pass through the model.
-        
+
         Args:
             z: Input tensor of shape [batch_size, n_vars, seq_len]
-            
+            channel_idx: Optional 1D LongTensor of channel indices actually present in
+                z's n_vars dimension (e.g. a random subset for high-channel-count
+                datasets). Only RevIN needs this -- its affine_weight/affine_bias are
+                indexed per real channel identity; everything past the reshape below
+                is channel-agnostic (each row of bs*n_vars is processed independently
+                regardless of which channel it came from), so channel_idx is not
+                threaded any further than RevIN.
+
         Returns:
             Output tensor of shape [batch_size, n_vars, pred_len]
         """
         bs, nvars, seq_len = z.shape
-        
+
         # Apply reversible normalization
-        if self.revin:  
+        if self.revin:
             z = z.permute(0, 2, 1)  # [bs, seq_len, nvars]
-            z = self.revin_layer(z, 'norm')
+            z = self.revin_layer(z, 'norm', channel_idx=channel_idx)
             z = z.permute(0, 2, 1)  # [bs, nvars, seq_len]
         
         # Reshape for tokenization: treat each variable independently
@@ -465,19 +643,48 @@ class EntroPE_backbone(nn.Module):
         z = z.to(device)
         
         # Pass through EntroPE backbone
+        if self.decoder_mode == 'patchtst_head':
+            z = self.backbone.forward_patch_level(z)  # [bs*nvars, num_patches, dim_global]
+            z = z.permute(0, 2, 1)  # [bs*nvars, dim_global, num_patches]
+            z = self.decoder_pool(z)  # [bs*nvars, dim_global, R]
+            z = z.view(bs, nvars, z.shape[1], z.shape[2])  # [bs, nvars, dim_global, R]
+            z = self.head(z)  # [bs, nvars, pred_len]
+            if self.revin:
+                z = z.permute(0, 2, 1)
+                z = self.revin_layer(z, 'denorm', channel_idx=channel_idx)
+                z = z.permute(0, 2, 1)
+            return z
+
         z = self.backbone(z)  # [bs * nvars, seq_len, d_model]
-        
+
+        if self.decoder_mode in ('horizon_query', 'latent_resampler'):
+            z = self._decode_length_independent(z, self.pred_len)  # [bs*nvars, pred_len]
+            z = z.view(bs, nvars, self.pred_len)  # [bs, nvars, pred_len]
+            if self.revin:
+                z = z.permute(0, 2, 1)
+                z = self.revin_layer(z, 'denorm', channel_idx=channel_idx)
+                z = z.permute(0, 2, 1)
+            return z
+
         # Reshape back to batch format
         z = z.view(bs, nvars, z.shape[1], z.shape[2])
         z = z.permute(0, 1, 3, 2)  # [bs, nvars, d_model, seq_len]
-        
+
+        # Pool seq_len -> fixed R before the head, if enabled, so the head's
+        # param count doesn't depend on the (possibly much larger) input length.
+        if self.decoder_pool is not None:
+            d_model = z.shape[2]
+            z = z.reshape(bs * nvars, d_model, seq_len)
+            z = self.decoder_pool(z)  # [bs*nvars, d_model, R]
+            z = z.view(bs, nvars, d_model, self.decoder_pool_size)
+
         # Apply prediction head
         z = self.head(z)  # [bs, nvars, pred_len]
         
         # Apply reversible denormalization
         if self.revin:
             z = z.permute(0, 2, 1)  # [bs, pred_len, nvars]
-            z = self.revin_layer(z, 'denorm')
+            z = self.revin_layer(z, 'denorm', channel_idx=channel_idx)
             z = z.permute(0, 2, 1)  # [bs, nvars, pred_len]
         
         return z
@@ -501,6 +708,7 @@ def create_global_transformer(args: EntroPEArgs) -> GlobalTransformer:
             dim_patch_emb=None,
             cross_attn_encoder=False,
             cross_attn_decoder=False,
+            multiple_of=args.multiple_of_global if args.multiple_of_global is not None else args.multiple_of,
         ),
     )
     return GlobalTransformer(global_args)
@@ -520,11 +728,13 @@ def create_patch_encoder(args: EntroPEArgs) -> PatchEncoder:
         cross_attn_init_by_pooling=args.cross_attn_init_by_pooling,
         head_dim=args.head_dim,
         max_encoder_seq_length=args.max_encoder_seq_length,
+        max_seqlen=args.max_encoder_seq_length,
         dropout=args.dropout,
         vocab_size=args.vocab_size,
         norm_eps=args.norm_eps,
         patch_size=args.patch_size,
         sliding_window=args.local_attention_window_len,
+        encoder_self_attn_within_patch=args.encoder_self_attn_within_patch,
         use_rope=args.use_rope,
         rope_theta=args.rope_theta,
         rope_use_fp32_in_outer_product=args.rope_use_fp32_in_outer_product,
@@ -560,7 +770,7 @@ def create_fusion_decoder(args: EntroPEArgs) -> FusionDecoder:
         cross_attn_k=args.cross_attn_k if args.cross_attn_decoder else None,
         head_dim=args.head_dim,
         max_encoder_seq_length=args.max_encoder_seq_length,
-        max_seqlen=args.max_encoder_seq_length,
+        max_seqlen=args.max_encoder_seq_length,  # RoPE covers full seq length
         dropout=args.dropout,
         vocab_size=args.vocab_size,
         norm_eps=args.norm_eps,

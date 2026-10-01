@@ -218,5 +218,10 @@ result.txt
 entropy_model/test.ipynb
 wandb
 results/
-.idea/
-har.ipynb
+
+.repro_eval
+.repro_deps
+eval_verify/
+
+# Submission PDF (remove this line if you want the paper in the repo)
+*.pdf

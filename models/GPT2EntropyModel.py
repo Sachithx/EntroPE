@@ -167,7 +167,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, return_hidden=False):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -190,6 +190,8 @@ class GPT(nn.Module):
             logits = self.lm_head(x) # note: using list [-1] to preserve the time dim >>>>  self.lm_head(x[:, [-1], :])
             loss = None
 
+        if return_hidden:
+            return logits, loss, x
         return logits, loss
 
     def crop_block_size(self, block_size):

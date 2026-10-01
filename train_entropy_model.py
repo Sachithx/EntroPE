@@ -21,7 +21,7 @@ def build_arg_parser():
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='ETTh2',
-                        help='Dataset name (ETTh1, ETTh2, ETTm1, ETTm2, Electricity, weather)')
+                        help='Dataset name (ETTh1, ETTh2, ETTm1, ETTm2, weather, ECL, Traffic, solar)')
     parser.add_argument('--data_path', type=str, default='ETTh2.csv', help='Data file name')
     parser.add_argument('--root_path', type=str, default='./dataset/', help='Root path of data files')
     parser.add_argument('--freq', type=str, default='h',

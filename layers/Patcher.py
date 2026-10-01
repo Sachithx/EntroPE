@@ -110,7 +110,6 @@ def load_entropy_model(checkpoint_dir, state_path, device="cpu"):
     """Load pretrained GPT entropy model."""
     with open(os.path.join(checkpoint_dir, "params.json")) as fr:
         params = json.loads(fr.read())["entropy_model"]
-    torch.set_default_dtype(torch.bfloat16)
     entropy_args = GPTConfig(
         n_layer=params["n_layer"],
         n_head=params["n_head"],
@@ -121,7 +120,17 @@ def load_entropy_model(checkpoint_dir, state_path, device="cpu"):
         block_size=params["block_size"],
     )
 
-    model = GPT(entropy_args)
+    # Construct in bfloat16 (this model is meant to run frozen, in bf16), but
+    # restore the prior global default dtype immediately after -- leaving the
+    # process-wide default mutated silently affects the dtype of every
+    # nn.Module constructed afterward, including unrelated ones (e.g. the
+    # downstream backbone's own trainable head), not just this frozen model.
+    prior_default_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.bfloat16)
+    try:
+        model = GPT(entropy_args)
+    finally:
+        torch.set_default_dtype(prior_default_dtype)
 
     model.load_state_dict(
         torch.load(state_path, map_location=device, weights_only=True)["model_state_dict"],
@@ -154,36 +163,52 @@ def calculate_entropies(
     device: str | None = None,
     enable_grad: bool = False,
 ):
-    """Compute entropy + predictions in batches."""
+    """Compute entropy + predictions in batches.
+
+    Each row (one sample/channel) is right-padded independently to a
+    multiple of the entropy model's own block_size *before* flattening,
+    so a causal window never spans two different rows. Previously the
+    whole (rows, seq_len) tensor was flattened first and rechunked
+    afterwards at a hardcoded width of 96 (the `max_length` attribute
+    read here was never actually set on the model, so it always fell
+    back to 96 regardless of the checkpoint) -- that silently mixed
+    different samples/channels whenever seq_len % 96 != 0, and crashed
+    outright for any checkpoint trained with block_size < 96.
+    """
     grad_ctx = nullcontext() if enable_grad else torch.no_grad()
 
     with grad_ctx:
+        R, L = tokens.shape
+        max_len = entropy_model.config.block_size
+
+        chunks_per_row = math.ceil(L / max_len)
+        L_padded = chunks_per_row * max_len
+        row_pad_len = L_padded - L
+
+        if row_pad_len:
+            row_pad = torch.zeros((R, row_pad_len), dtype=tokens.dtype, device=tokens.device)
+            tokens_padded = torch.cat([tokens, row_pad], dim=1)
+        else:
+            tokens_padded = tokens
+
+        # (R, L_padded) -> (R * chunks_per_row, max_len); each row's own
+        # padding (if any) only ever lands at the end of that row's own
+        # last chunk, never mixed with the next row's data.
+        flat = tokens_padded.reshape(R * chunks_per_row, max_len)
+
         entropies, preds = [], []
-
-        max_len = getattr(entropy_model, "max_length", 96)
-        batch_numel = max_len * patching_batch_size
-        splits = torch.split(tokens.flatten(), batch_numel)
-
-        for split in splits:
-            pad_len = (max_len - (split.numel() % max_len)) % max_len
-            if pad_len:
-                pad = torch.zeros(pad_len, dtype=split.dtype, device=split.device)
-                split = torch.cat([split, pad])
-
-            split = split.view(-1, max_len)
-
+        for split in torch.split(flat, patching_batch_size):
             if device:
                 split = split.to(device)
 
             with torch.no_grad(), torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 pred, _ = entropy_model(split)
 
-            pred = pred.view(-1, pred.shape[-1])[: split.numel() - pad_len]
             preds.append(pred)
             entropies.append(entropy(pred))
 
-        entropies = torch.cat(entropies).view(tokens.shape)
-        preds = torch.cat(preds).view(tokens.shape[0], -1)
+        entropies = torch.cat(entropies, dim=0).view(R, L_padded)[:, :L]
+        preds = torch.cat(preds, dim=0).view(R, L_padded, -1)[:, :L, :].reshape(R, -1)
 
     return entropies, preds
 

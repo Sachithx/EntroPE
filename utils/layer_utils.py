@@ -50,6 +50,31 @@ def patch_ids_from_lengths(patch_lengths, seq_len):
     ), f"Invalid patch_ids: max={torch.max(patch_ids)}, min={torch.min(patch_ids)}"
     return patch_ids
 
+def sliding_window_causal_mask(seqlen, window, device):
+    """Fixed-size local causal mask: query i may attend to key j iff
+    j <= i < j + window. Returns a (seqlen, seqlen) bool mask, True = attend.
+    Broadcasts over batch/head dims when passed to SDPA's attn_mask.
+    """
+    idx = torch.arange(seqlen, device=device)
+    q = idx.unsqueeze(1)
+    kv = idx.unsqueeze(0)
+    return (kv <= q) & (kv > q - window)
+
+
+def within_patch_causal_mask(patch_ids, seqlen):
+    """Exact within-patch causal self-attention mask: query i may attend to
+    key j iff j <= i AND patch_ids[i] == patch_ids[j] (same dynamic patch),
+    regardless of patch length. Returns (bs, seqlen, seqlen) bool mask,
+    True = attend; caller unsqueezes a heads dim (dim=1) before SDPA.
+    """
+    q_ids = patch_ids.unsqueeze(-1)   # (bs, seqlen, 1)
+    kv_ids = patch_ids.unsqueeze(1)   # (bs, 1, seqlen)
+    same_patch = q_ids == kv_ids
+    idx = torch.arange(seqlen, device=patch_ids.device)
+    causal = (idx.unsqueeze(1) >= idx.unsqueeze(0)).unsqueeze(0)  # (1, seqlen, seqlen)
+    return same_patch & causal
+
+
 def cross_attn_mask(
     patch_ids,
     patch_lengths,

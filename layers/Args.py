@@ -160,6 +160,8 @@ class EntroPEArgs(BaseTransformerArgs):
     norm_type: str = "rmsnorm"
 
     multiple_of: int = 128
+    multiple_of_global: int | None = None  # FFN rounding unit for the global transformer only;
+                                            # None -> inherit `multiple_of` (old shared behavior).
     ffn_dim_multiplier: float = 1.0
     dropout: float = 0.0
 
@@ -174,6 +176,7 @@ class EntroPEArgs(BaseTransformerArgs):
     n_kv_heads_global: int | None = None
 
     local_attention_window_len: int | None = None
+    encoder_self_attn_within_patch: bool = False
 
     # Logging / checkpoints
     log_patch_lengths: bool = False
@@ -197,6 +200,7 @@ class LocalModelArgs(BaseTransformerArgs):
     patch_size: float
 
     sliding_window: int | None
+    encoder_self_attn_within_patch: bool = False
     use_rope: bool
     max_encoder_seq_length: int
 
@@ -239,6 +243,7 @@ class LocalModelBase(nn.Module):
         self.attn_impl = args.attn_impl
         self.attn_bias_type = args.attn_bias_type
         self.sliding_window = args.sliding_window
+        self.encoder_self_attn_within_patch = getattr(args, "encoder_self_attn_within_patch", False)
 
         # Positional encoding
         self.use_rope = args.use_rope
