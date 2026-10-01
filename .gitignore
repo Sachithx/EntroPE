@@ -225,3 +225,4 @@ eval_verify/
 
 # Submission PDF (remove this line if you want the paper in the repo)
 *.pdf
+*.pdf
