@@ -51,10 +51,19 @@ forecasting weights and are required even for eval-only runs.
 
 ## 3. Reproduce the reported numbers (eval only, no training)
 
+There is one script per dataset (`scripts/<DATASET>.sh`), each holding the best
+config for all four horizons (96/192/336/720) in a readable table. Pass
+`eval` (default) or `train`:
+
 ```bash
-bash scripts/eval_all.sh           # all 8 datasets
-bash scripts/eval_all.sh ETTh1     # one dataset
+bash scripts/ETTh1.sh eval         # one dataset, all 4 horizons
+bash scripts/run_all.sh eval       # every dataset
+GPU=1 bash scripts/ECL.sh eval     # choose a GPU
 ```
+
+Datasets: `ETTh1 ETTh2 ETTm1 ETTm2 weather ECL Traffic solar`. Each horizon's
+config is stated inline in the script with its paper MSE/MAE. Fixed settings
+(architecture, L=96, epochs, …) are argparse defaults in `run_longExp.py`.
 
 
 MSE/MAE are computed in the standardized (z-scored) space, following the
@@ -65,8 +74,8 @@ standard long-term-forecasting protocol.
 **Stage 2 — forecasting (the frozen entropy models are already provided):**
 
 ```bash
-bash scripts/train_all.sh          # all cells
-bash scripts/train_all.sh ETTm2    # one dataset
+bash scripts/ETTm2.sh train        # one dataset, all 4 horizons
+bash scripts/run_all.sh train      # every cell
 ```
 
 Each cell trains at its best configuration and writes
@@ -91,8 +100,40 @@ models/                   EntroPE forecasting model + GPT2 entropy model
 layers/                   Patcher, encoder, global transformer, fusion decoder, RevIN, tokenizer
 data_provider/            Dataset loaders and StandardScaler
 utils/                    Metrics, schedulers, helpers
-scripts/                  best_configs.tsv + reproduction scripts
+scripts/                  per-dataset run scripts (<DATASET>.sh, train|eval), _common.sh, run_all.sh, train_entropy.sh
 dataset/                  Benchmark CSVs
 checkpoints/              Provided forecasting checkpoints (one dir per cell)
 entropy_model_checkpoints/dm16/   Provided frozen entropy models
 ```
+
+
+## Citing
+
+If you found this work useful for you, please consider citing it.
+
+```bibtex
+@inproceedings{sachith_entrope_26,
+  title={Entropy Guided Dynamic Patch Segmentation for Time Series Transformers},
+  author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
+  journal={arXiv preprint arXiv:2509.26157},
+  year={2025}
+}
+```
+
+
+## Acknowledgments
+
+This work builds upon and is inspired by several key contributions in the field:
+
+- **PatchTST**: Our approach is built on the foundation of PatchTST and other patch-based time series transformers, which demonstrated the effectiveness of patch-based architectures for time series forecasting.
+  - Repository: https://github.com/yuqinie98/PatchTST
+
+- **nanoGPT**: The Entropy Model GPT-2 architecture implementation partially incorporates code from Andrej Karpathy's nanoGPT implementation. We gratefully acknowledge this clean and educational codebase.
+  - Repository: https://github.com/karpathy/nanoGPT
+
+- **Byte Latent Transformer**: Our dynamic patching approach draws inspiration from advances in NLP, particularly the Byte Latent Transformer's innovative approach to variable-length tokenization.
+  - Repository: https://github.com/facebookresearch/blt
+
+---
+
+We thank the authors of these works for their contributions to the open-source community and for advancing the state of the art in time series forecasting and transformer architectures.
