@@ -22,22 +22,32 @@ Tested with Python 3.10 and PyTorch 2.x (CUDA 12.x). A single GPU is enough.
 
 ## 2. Data and checkpoints
 
-- **Datasets.** The eight standard benchmark CSVs are in `dataset/`
-  (`ETTh1/ETTh2/ETTm1/ETTm2.csv`, `weather.csv`, `electricity.csv`,
-  `traffic.csv`, `solar.csv`). Each dataset is normalized by a
-  `StandardScaler` fit on its own training split; this is done
-  automatically at load time, so no extra files are needed.
-- **Checkpoints.** Two sets are required and are provided with the release:
-  - `entropy_model_checkpoints/dm16/` — the frozen GPT entropy models
-    (`params.json` + one `<dataset>.pt` per dataset). **These are loaded
-    separately from the forecasting weights and are required even for
-    eval-only.**
-  - `checkpoints/<setting>/checkpoint.pth` — one trained forecasting model per
-    (dataset, horizon) cell.
+The benchmark CSVs and the trained forecasting checkpoints are large, so they
+are hosted on the HuggingFace Hub (not GitHub):
+**https://huggingface.co/datasets/sachithabey/EntroPE**
 
-  If you cloned from GitHub (where large files are git-ignored), download the
-  `checkpoints/` and `entropy_model_checkpoints/` folders from the release
-  bucket and place them at the repository root, preserving their layout.
+Fetch them into the repo with one command (needs `huggingface_hub`, included in
+`requirements.txt`):
+
+```bash
+python download_data.py                      # datasets + checkpoints
+python download_data.py --what datasets      # just the CSVs (train from scratch)
+python download_data.py --what checkpoints   # just the checkpoints (eval only)
+```
+
+This writes to the exact paths the code expects:
+
+- **`dataset/`** — the eight benchmark CSVs (`ETTh1/ETTh2/ETTm1/ETTm2.csv`,
+  `weather.csv`, `electricity.csv`, `traffic.csv`, `solar.csv`). Each is
+  normalized by a `StandardScaler` fit on its own training split, automatically
+  at load time.
+- **`checkpoints/<setting>/checkpoint.pth`** — one trained forecasting model per
+  (dataset, horizon) cell (download only if you want eval-only reproduction).
+
+The frozen GPT entropy models in **`entropy_model_checkpoints/dm16/`**
+(`params.json` + one `<dataset>.pt` per dataset) are small and **ship in this
+GitHub repo** — no download needed. They are loaded separately from the
+forecasting weights and are required even for eval-only runs.
 
 ## 3. Reproduce the reported numbers (eval only, no training)
 
