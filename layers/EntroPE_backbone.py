@@ -80,6 +80,7 @@ class EntroPE(nn.Module, SequenceModelWithOutput):
                     quantile_threshold=args.patching_threshold,
                     monotonicity=args.monotonicity,
                     max_patch_length=args.max_patch_length,
+                    patch_size=args.patch_size,
                     patching_batch_size=args.patching_batch_size,
                 )
             )

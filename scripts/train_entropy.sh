@@ -7,20 +7,23 @@
 # forecasting configs. Writes params.json + <dataset>.pt into the output dir.
 #
 # Usage:  scripts/train_entropy.sh [dataset]
-#   optional [dataset] filter: ETTh1 | ETTh2 | ETTm1 | ETTm2 | weather
+#   optional [dataset] filter: ETTh1 | ETTh2 | ETTm1 | ETTm2 | weather | ECL | Traffic | solar
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 filter="${1:-}"
 OUT=entropy_model_checkpoints/dm16
 
-# dataset  data_file     freq
+# dataset  data_file          freq
 rows=(
-  "ETTh1    ETTh1.csv     h"
-  "ETTh2    ETTh2.csv     h"
-  "ETTm1    ETTm1.csv     t"
-  "ETTm2    ETTm2.csv     t"
-  "weather  weather.csv   h"
+  "ETTh1    ETTh1.csv         h"
+  "ETTh2    ETTh2.csv         h"
+  "ETTm1    ETTm1.csv         t"
+  "ETTm2    ETTm2.csv         t"
+  "weather  weather.csv       h"
+  "ECL      electricity.csv   h"
+  "Traffic  traffic.csv       h"
+  "solar    solar.csv         t"
 )
 
 for row in "${rows[@]}"; do

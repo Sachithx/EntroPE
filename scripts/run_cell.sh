@@ -22,6 +22,11 @@ run_id="${17}"
 
 if [ "$mode" = "train" ]; then is_training=1; else is_training=0; fi
 
+# Pin the physical GPU via CUDA_VISIBLE_DEVICES, then always use logical cuda:0.
+# Exp_Basic sets CUDA_VISIBLE_DEVICES=args.gpu AND device=cuda:args.gpu, so
+# --gpu N with N!=0 fails when only one device is visible.
+export CUDA_VISIBLE_DEVICES="${GPU:-0}"
+
 python -u run_longExp.py \
   --is_training "$is_training" --model EntroPE \
   --model_id "$run_id" --model_id_name "$dataset" --setting_suffix "$run_id" \
@@ -41,6 +46,6 @@ python -u run_longExp.py \
   --revin 1 --affine 1 --subtract_last 0 \
   --batch_size "$batch_size" --train_epochs 50 --patience 10 \
   --learning_rate "$lr" --lradj TST --pct_start 0.3 --activation gelu --num_workers 4 \
-  --random_seed "$seed" --itr 1 --gpu "${GPU:-0}" \
+  --random_seed "$seed" --itr 1 --gpu 0 \
   --checkpoints ./checkpoints \
   --entropy_model_checkpoint_dir ./entropy_model_checkpoints/dm16

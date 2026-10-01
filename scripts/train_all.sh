@@ -6,7 +6,7 @@
 # with scripts/train_entropy.sh).
 #
 # Usage:  scripts/train_all.sh [dataset]
-#   optional [dataset] filter: ETTh1 | ETTh2 | ETTm1 | ETTm2 | weather
+#   optional [dataset] filter: ETTh1 | ETTh2 | ETTm1 | ETTm2 | weather | ECL | Traffic | solar
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
