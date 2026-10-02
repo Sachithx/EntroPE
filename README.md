@@ -49,7 +49,7 @@ The frozen GPT entropy models in **`entropy_model_checkpoints/dm16/`**
 GitHub repo** — no download needed. They are loaded separately from the
 forecasting weights and are required even for eval-only runs.
 
-## 3. Reproduce the reported numbers (eval only, no training)
+## 3. Reproduce the numbers (eval only, no training)
 
 There is one script per dataset (`scripts/<DATASET>.sh`), each holding the best
 config for all four horizons (96/192/336/720) in a readable table. Pass
