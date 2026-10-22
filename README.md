@@ -1,5 +1,8 @@
 # (NeurIPS'26) 🎲 EntroPE: Entropy-Guided Dynamic Patch Segmentation for Time Series Transformers
 
+> [!CAUTION]
+> **Note:** The arXiv version currently linked (arXiv:2509.26157) uses a different evaluation protocol from the one implemented here. The results in this repository follow the NeurIPS 2026 camera-ready protocol; the updated arXiv version will be uploaded soon.
+
 Reference implementation for the NeurIPS 2026 paper. EntroPE places patch
 boundaries at high-entropy positions using a frozen, pre-trained causal GPT
 entropy model, then forecasts with a patch encoder / global transformer /
