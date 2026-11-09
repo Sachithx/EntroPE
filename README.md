@@ -23,6 +23,12 @@ pip install -r requirements.txt
 
 Tested with Python 3.10 and PyTorch 2.x (CUDA 12.x). A single GPU is enough.
 
+**Apple Silicon (MPS).** Evaluating the provided checkpoints also works on a Mac.
+When CUDA is not available, the code uses the Apple GPU (MPS) automatically
+(`--use_mps 0` forces CPU). The results match the CUDA runs to about 1e-4. On
+macOS 27, use Python ≥ 3.11 (e.g. `python=3.13`), because the Python 3.10
+SciPy wheel fails to load there.
+
 ## 2. Data and checkpoints
 
 The benchmark CSVs and the trained forecasting checkpoints are large, so they

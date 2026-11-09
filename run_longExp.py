@@ -309,8 +309,10 @@ def _add_gpu_args(parser):
     """Add GPU-related arguments"""
     parser.add_argument('--use_gpu', type=bool, default=True, 
                         help='use GPU if available')
-    parser.add_argument('--gpu', type=int, default=0, 
+    parser.add_argument('--gpu', type=int, default=0,
                         help='GPU device ID')
+    parser.add_argument('--use_mps', type=int, default=1,
+                        help='use Apple Silicon GPU (MPS) when CUDA is unavailable (1) or force CPU (0)')
     parser.add_argument('--use_multi_gpu', action='store_true', default=False,
                         help='use multiple GPUs')
     parser.add_argument('--devices', type=str, default='0,1,2,3', 
