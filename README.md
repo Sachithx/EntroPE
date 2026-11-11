@@ -1,5 +1,12 @@
 # (NeurIPS'26) 🎲 EntroPE: Entropy-Guided Dynamic Patch Segmentation for Time Series Transformers
 
+[![arXiv](https://img.shields.io/badge/arXiv-2509.26157-b31b1b?logo=arxiv)](https://arxiv.org/abs/2509.26157)
+[![Venue](https://img.shields.io/badge/NeurIPS-2026-4b44ce)](https://neurips.cc/virtual/2026/loc/sydney/poster/152779)
+[![Project Page](https://img.shields.io/badge/Project-Website-2176BC?logo=GoogleChrome)](https://sachithx.github.io/research/entrope.html)
+[![HF Daily Paper](https://img.shields.io/badge/HF%20Daily%20Paper-2509.26157-FFD21E.svg?logo=huggingface)](https://huggingface.co/papers/2509.26157)
+[![HF Dataset](https://img.shields.io/badge/HuggingFace-Datasets-FFD21E.svg?logo=huggingface)](https://huggingface.co/datasets/sachithabey/EntroPE)
+
+
 Reference implementation for the NeurIPS 2026 paper. EntroPE places patch
 boundaries at high-entropy positions using a frozen, pre-trained causal GPT
 entropy model, then forecasts with a patch encoder / global transformer /
