@@ -121,7 +121,7 @@ If you found this work useful for you, please consider citing it.
 @inproceedings{sachith_entrope_26,
   title={Entropy Guided Dynamic Patch Segmentation for Time Series Transformers},
   author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
-  booktitle = {Advances in Neural Information Processing Systems},
+  booktitle={The Fortieth Annual Conference on Neural Information Processing Systems},
   year={2026}
 }
 ```
