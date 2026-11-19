@@ -125,11 +125,12 @@ entropy_model_checkpoints/dm16/   Provided frozen entropy models
 If you found this work useful for you, please consider citing it.
 
 ```bibtex
-@inproceedings{sachith_entrope_26,
+@inproceedings{abeywickrama2026entropy,
   title={Entropy Guided Dynamic Patch Segmentation for Time Series Transformers},
-  author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
+  author={Sachith Abeywickrama and Emadeldeen Eldele and Min Wu and Xiaoli Li and Chau Yuen},
   booktitle={The Fortieth Annual Conference on Neural Information Processing Systems},
-  year={2026}
+  year={2026},
+  url={https://openreview.net/forum?id=QPKvNhibb1}
 }
 ```
 
